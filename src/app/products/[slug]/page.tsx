@@ -1,260 +1,115 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { PRODUCTS, getProduct, formatPrice } from '@/lib/catalog';
 import { AddToCartButton } from '@/components/AddToCartButton';
+import { ProductCover } from '@/components/atoms/ProductCover';
+import { SectionHead } from '@/components/atoms/SectionHead';
 
 export async function generateStaticParams() {
   return PRODUCTS.map((p) => ({ slug: p.slug }));
 }
 
-export default async function ProductPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const product = getProduct(slug);
   if (!product) notFound();
 
-  const productEmoji =
-    product.category === 'apparel'
-      ? product.id.includes('hoodie') ? '🧥' : '👕'
-      : product.id.includes('sticker') ? '🏷️' : '📌';
+  const productIndex = PRODUCTS.findIndex((p) => p.id === product.id);
+  const others = PRODUCTS.filter((p) => p.id !== product.id);
 
   return (
-    <div style={{ backgroundColor: '#1A161C', minHeight: '100vh' }}>
-      <div
-        style={{
-          maxWidth: '1400px',
-          margin: '0 auto',
-          padding: '48px 24px',
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '80px',
-          alignItems: 'start',
-        }}
-      >
-        {/* ─── Left: Product Image ─── */}
-        <div style={{ position: 'sticky', top: '80px' }}>
-          {/* Breadcrumb */}
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: 'rgba(239, 233, 214, 0.4)',
-              marginBottom: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Catalog</a>
-            <span>/</span>
-            <span style={{ color: '#FF7300' }}>{product.name}</span>
-          </div>
+    <div>
+      {/* Crumb */}
+      <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+        <Link href="/" style={{ cursor: 'pointer' }}>← BACK TO CATALOG</Link>
+        <span>{product.cornerTag} · SKU {product.sku}</span>
+      </div>
 
-          {/* Main image */}
-          <div
-            style={{
-              width: '100%',
-              aspectRatio: '1/1',
-              background: product.imagePlaceholder,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-              marginBottom: '16px',
-            }}
-          >
-            <span style={{ fontSize: '120px', opacity: 0.2 }}>{productEmoji}</span>
-
-            {/* Corner tag */}
-            {product.featured && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: 0,
-                  backgroundColor: '#FF7300',
-                  color: '#1A161C',
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '9px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.12em',
-                  padding: '6px 12px',
-                }}
-              >
-                Featured
-              </div>
-            )}
-          </div>
-
-          {/* Thumbnail strip — placeholder dots */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                style={{
-                  width: '64px',
-                  height: '64px',
-                  background: i === 0 ? product.imagePlaceholder : 'rgba(54, 44, 64, 0.5)',
-                  border: `1px solid ${i === 0 ? '#FF7300' : 'rgba(239, 233, 214, 0.1)'}`,
-                  cursor: 'pointer',
-                }}
-              />
-            ))}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', borderBottom: '1px solid var(--ink)' }}>
+        <div style={{ aspectRatio: '1 / 1', borderRight: '1px solid var(--ink)', position: 'relative' }}>
+          <ProductCover product={product} />
+          <div className="mono" style={{ position: 'absolute', bottom: 16, left: 16, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: product.cover === 'dark' ? 'var(--paper)' : 'var(--ink)' }}>
+            FIG. 01 / FRONT
           </div>
         </div>
 
-        {/* ─── Right: Product Info ─── */}
-        <div>
-          {/* Category */}
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              color: '#FF7300',
-              marginBottom: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <span>{product.category}</span>
-            {product.tags.map((tag) => (
-              <span
-                key={tag}
-                style={{
-                  backgroundColor: 'rgba(255, 115, 0, 0.12)',
-                  color: '#FF7300',
-                  padding: '2px 6px',
-                  fontSize: '9px',
-                }}
-              >
-                {tag}
-              </span>
-            ))}
+        <div style={{ padding: '40px 40px 32px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div>
+            <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
+              {String(productIndex + 1).padStart(2, '0')} / 04 · {product.type.toUpperCase()}
+            </div>
+            <h1 className="display" style={{ fontSize: 'clamp(56px, 6.5vw, 96px)', lineHeight: 0.92, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
+              {product.name}
+            </h1>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginTop: 16 }}>
+              <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0, maxWidth: 460, color: 'var(--ink)' }}>
+                {product.description}
+              </p>
+              <div className="display tabnum" style={{ fontSize: 44, fontWeight: 400, lineHeight: 1 }}>
+                {formatPrice(product.price)}
+              </div>
+            </div>
           </div>
 
-          {/* Product name */}
-          <h1
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontWeight: '700',
-              fontSize: 'clamp(36px, 5vw, 56px)',
-              textTransform: 'uppercase',
-              letterSpacing: '-0.02em',
-              lineHeight: '0.95',
-              color: '#EFE9D6',
-              margin: '0 0 16px',
-            }}
-          >
-            {product.name}
-          </h1>
+          <div className="hr-soft" />
 
-          {/* Tagline */}
-          <p
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontSize: '18px',
-              color: 'rgba(239, 233, 214, 0.6)',
-              margin: '0 0 32px',
-              lineHeight: '1.5',
-              fontStyle: 'italic',
-            }}
-          >
-            {product.tagline}
-          </p>
-
-          {/* Price */}
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '36px',
-              fontWeight: '700',
-              color: '#FF7300',
-              marginBottom: '32px',
-              paddingBottom: '32px',
-              borderBottom: '1px solid rgba(239, 233, 214, 0.12)',
-            }}
-          >
-            {formatPrice(product.price)}
-          </div>
-
-          {/* Add to cart — client component */}
           <AddToCartButton product={product} />
 
-          {/* Description */}
-          <div
-            style={{
-              marginTop: '40px',
-              paddingTop: '32px',
-              borderTop: '1px solid rgba(239, 233, 214, 0.12)',
-            }}
-          >
-            <h3
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '11px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                color: 'rgba(239, 233, 214, 0.5)',
-                marginBottom: '16px',
-              }}
-            >
-              Description
-            </h3>
-            <p
-              style={{
-                fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                fontSize: '16px',
-                lineHeight: '1.7',
-                color: 'rgba(239, 233, 214, 0.75)',
-              }}
-            >
-              {product.description}
-            </p>
-          </div>
+          <div className="hr-soft" />
 
-          {/* Inngest workflow callout */}
-          <div
-            style={{
-              marginTop: '32px',
-              padding: '20px 24px',
-              backgroundColor: 'rgba(255, 115, 0, 0.06)',
-              borderLeft: '2px solid #FF7300',
-            }}
-          >
-            <div
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '10px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                color: '#FF7300',
-                marginBottom: '8px',
-              }}
-            >
-              Powered by Inngest
+          <div>
+            <div className="meta-row mono">
+              <span className="plus">+</span>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--muted)' }}>FABRIC</span>
+                <span>{product.fabric}</span>
+              </span>
             </div>
-            <p
-              style={{
-                fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                fontSize: '14px',
-                color: 'rgba(239, 233, 214, 0.6)',
-                margin: 0,
-                lineHeight: '1.5',
-              }}
-            >
-              Every order runs through a 5-step durable workflow — payment capture, inventory reservation,
-              fulfillment, shipping, and confirmation. Zero dropped steps. Automatic retries. Watch it live on your order status page.
-            </p>
+            <div className="meta-row mono">
+              <span className="plus">+</span>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--muted)' }}>FIT</span>
+                <span>{product.fit}</span>
+              </span>
+            </div>
+            <div className="meta-row mono">
+              <span className="plus">+</span>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--muted)' }}>SHIPS IN</span>
+                <span>3—5 BUSINESS DAYS</span>
+              </span>
+            </div>
+            <div className="meta-row mono" style={{ borderBottom: 'none' }}>
+              <span className="plus">+</span>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--muted)' }}>FULFILLMENT</span>
+                <span>RUNS ON INNGEST · 3 STEPS</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
+
+      <section>
+        <SectionHead num="2.5" title="ALSO IN STOCK" blurb="Pair the tee with the hoodie. Add the hat to your kit. Stickers go on the laptop." />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', borderBottom: '1px solid var(--ink)' }}>
+          {others.map((p, i) => (
+            <Link
+              key={p.id}
+              href={`/products/${p.slug}`}
+              style={{ aspectRatio: '1/1.1', borderRight: i < 2 ? '1px solid var(--ink)' : 'none', cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column' }}
+            >
+              <div style={{ flex: 1, position: 'relative' }}>
+                <ProductCover product={p} />
+              </div>
+              <div style={{ padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderTop: '1px solid var(--rule-soft)', background: 'var(--paper)' }}>
+                <div className="display" style={{ fontSize: 18, fontWeight: 500 }}>{p.name}</div>
+                <div className="display tabnum" style={{ fontSize: 18 }}>{formatPrice(p.price)}</div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

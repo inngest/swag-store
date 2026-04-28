@@ -1,405 +1,155 @@
 'use client';
 
-// ─── Admin Order List ─────────────────────────────────────────────────────
-// Internal screen for the livestream — shows orders flowing in with their
-// Inngest workflow status. In production, this would poll /api/admin/orders
-// which reads from Inngest run status + order DB.
-//
-// For demo: generates mock orders and simulates them advancing through steps.
-
-import { useState, useEffect } from 'react';
-import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import * as React from 'react';
 import Link from 'next/link';
+import { StepDot } from './atoms/WorkflowTracker';
 
-type OrderStatus = 'processing' | 'fulfilling' | 'shipped' | 'complete';
-type MockOrder = {
+type Order = {
   id: string;
-  product: string;
-  productId: string;
-  size?: string;
-  amount: number;
-  status: OrderStatus;
-  step: number; // 0-4
-  createdAt: string;
   email: string;
+  total: number;
+  items: string;
+  step: string;
+  status: 'running' | 'complete';
+  t: string;
 };
 
-const STATUSES: OrderStatus[] = ['processing', 'fulfilling', 'shipped', 'complete'];
-const STATUS_COLORS: Record<OrderStatus, string> = {
-  processing: '#FF7300',
-  fulfilling: '#CBB26A',
-  shipped: '#59A569',
-  complete: '#006250',
-};
-
-const MOCK_EMAILS = [
-  'tony@buildwithfury.dev',
-  'dev@nocodenevermind.io',
-  'sarah@retryqueen.com',
-  'mike@infiniteloops.net',
-  'alex@durableordie.com',
+const SEED: Order[] = [
+  { id: 'ord_a01', email: 'alex@example.com', total: 42.0, items: 'Tee × 1, Hat × 1', step: 'send-confirmation', status: 'running', t: '0s ago' },
+  { id: 'ord_a02', email: 'j.lin@hey.so', total: 86.0, items: 'Hoodie × 1, Stickers × 1', step: 'reserve-inventory', status: 'running', t: '12s ago' },
+  { id: 'ord_a03', email: 'marco@inn.dev', total: 28.0, items: 'Tee × 1', step: 'complete', status: 'complete', t: '1m ago' },
+  { id: 'ord_a04', email: 'sam@codes.io', total: 24.0, items: 'Hat × 1', step: 'complete', status: 'complete', t: '3m ago' },
+  { id: 'ord_a05', email: 'priya@labs.run', total: 70.0, items: 'Hoodie × 1, Hat × 1', step: 'complete', status: 'complete', t: '5m ago' },
+  { id: 'ord_a06', email: 'wren@deno.fm', total: 12.0, items: 'Stickers × 1', step: 'complete', status: 'complete', t: '8m ago' },
+  { id: 'ord_a07', email: 'kira@build.so', total: 56.0, items: 'Tee × 2', step: 'complete', status: 'complete', t: '12m ago' },
 ];
 
-function generateOrder(i: number): MockOrder {
-  const product = PRODUCTS[i % PRODUCTS.length];
-  const sizes = ['S', 'M', 'L', 'XL'];
-  return {
-    id: `ORD-${(1000 + i).toString(16).toUpperCase()}`,
-    product: product.name,
-    productId: product.id,
-    size: product.sizes ? sizes[i % sizes.length] : undefined,
-    amount: product.price,
-    status: 'processing',
-    step: 0,
-    createdAt: new Date(Date.now() - i * 47000).toISOString(),
-    email: MOCK_EMAILS[i % MOCK_EMAILS.length],
-  };
-}
-
-const INITIAL_ORDERS: MockOrder[] = Array.from({ length: 6 }, (_, i) => ({
-  ...generateOrder(i),
-  // Seed some in various states
-  status: STATUSES[Math.min(i, 3)] as OrderStatus,
-  step: Math.min(i, 4),
-}));
-
 export function AdminClient() {
-  const [orders, setOrders] = useState<MockOrder[]>(INITIAL_ORDERS);
-  const [tick, setTick] = useState(0);
+  const [orders, setOrders] = React.useState<Order[]>(SEED);
+  const [pulse, setPulse] = React.useState<string | null>(null);
 
-  // Simulate orders advancing every few seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTick((t) => t + 1);
-
-      // Advance one random non-complete order
-      setOrders((prev) => {
-        const advancing = prev.filter((o) => o.status !== 'complete');
-        if (advancing.length === 0) {
-          // Add a new order
-          const newOrder = generateOrder(prev.length);
-          return [newOrder, ...prev.slice(0, 9)];
-        }
-        const target = advancing[Math.floor(Math.random() * advancing.length)];
-        return prev.map((o) => {
-          if (o.id !== target.id) return o;
-          const nextStep = Math.min(o.step + 1, 4);
-          const nextStatus = nextStep === 1 ? 'fulfilling' : nextStep >= 3 ? nextStep === 4 ? 'complete' : 'shipped' : o.status;
-          return { ...o, step: nextStep, status: nextStatus as OrderStatus };
-        });
-      });
-    }, 2800);
-    return () => clearInterval(interval);
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setOrders((prev) =>
+        prev.map((o, i) => {
+          if (i === 0 && o.status === 'running') {
+            if (o.step === 'capture-payment') return { ...o, step: 'reserve-inventory' };
+            if (o.step === 'reserve-inventory') return { ...o, step: 'send-confirmation' };
+            if (o.step === 'send-confirmation') {
+              setPulse(o.id);
+              setTimeout(() => setPulse(null), 700);
+              return { ...o, step: 'complete', status: 'complete', t: 'just now' };
+            }
+          }
+          return o;
+        }),
+      );
+    }, 2400);
+    return () => clearInterval(id);
   }, []);
 
-  const counts = {
-    processing: orders.filter((o) => o.status === 'processing').length,
-    fulfilling: orders.filter((o) => o.status === 'fulfilling').length,
-    shipped: orders.filter((o) => o.status === 'shipped').length,
-    complete: orders.filter((o) => o.status === 'complete').length,
-  };
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      const fakes = ['dev@inn.gst', 'kira@vector.studio', 'rohan@ship.now', 'luca@workflow.cc'];
+      const itemsList = ['Tee × 1', 'Hoodie × 1', 'Hat × 1, Stickers × 1', 'Tee × 1, Hat × 1'];
+      const totals = [28.0, 58.0, 36.0, 52.0];
+      const i = Math.floor(Math.random() * fakes.length);
+      const j = Math.floor(Math.random() * itemsList.length);
+      const newOrder: Order = {
+        id: `ord_${Math.random().toString(36).slice(2, 7)}`,
+        email: fakes[i],
+        total: totals[j],
+        items: itemsList[j],
+        step: 'capture-payment',
+        status: 'running',
+        t: 'just now',
+      };
+      setOrders((prev) => [newOrder, ...prev].slice(0, 9));
+      setPulse(newOrder.id);
+      setTimeout(() => setPulse(null), 700);
+    }, 7800);
+    return () => clearInterval(t);
+  }, []);
+
+  const liveCount = orders.filter((o) => o.status === 'running').length;
+  const revenue = orders.reduce((s, o) => s + o.total, 0).toFixed(0);
 
   return (
-    <div style={{ backgroundColor: '#1A161C', minHeight: 'calc(100vh - 56px)' }}>
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '40px 24px' }}>
-
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            marginBottom: '32px',
-            paddingBottom: '20px',
-            borderBottom: '1px solid rgba(239, 233, 214, 0.12)',
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '10px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em',
-                color: '#FF7300',
-                marginBottom: '6px',
-              }}
-            >
-              Internal — Admin
-            </div>
-            <h1
-              style={{
-                fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                fontWeight: '700',
-                fontSize: '28px',
-                textTransform: 'uppercase',
-                color: '#EFE9D6',
-                margin: 0,
-              }}
-            >
-              Order Dashboard
-            </h1>
+    <div>
+      <div style={{ borderBottom: '1px solid var(--ink)', padding: '32px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 32, alignItems: 'end' }}>
+        <div>
+          <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
+            ADMIN · 07 / ORDERS · CHANNEL · admin:orders
           </div>
-
-          {/* Live indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div
-              style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: '#59A569',
-                animation: 'pulse 2s ease-in-out infinite',
-              }}
-            />
-            <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
-            <span
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '10px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                color: '#59A569',
-              }}
-            >
-              Live
-            </span>
-          </div>
+          <h1 className="display" style={{ fontSize: 'clamp(56px, 8vw, 120px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
+            Orders, live.
+          </h1>
         </div>
-
-        {/* Stats row */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: '1px',
-            backgroundColor: 'rgba(239, 233, 214, 0.08)',
-            marginBottom: '32px',
-          }}
-        >
-          {[
-            { label: 'Processing', count: counts.processing, color: '#FF7300' },
-            { label: 'Fulfilling', count: counts.fulfilling, color: '#CBB26A' },
-            { label: 'Shipped', count: counts.shipped, color: '#59A569' },
-            { label: 'Complete', count: counts.complete, color: '#006250' },
-          ].map(({ label, count, color }) => (
-            <div
-              key={label}
-              style={{
-                backgroundColor: '#1A161C',
-                padding: '20px 24px',
-                borderTop: `2px solid ${color}`,
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '32px',
-                  fontWeight: '700',
-                  color,
-                  lineHeight: 1,
-                  marginBottom: '6px',
-                }}
-              >
-                {count}
-              </div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  color: 'rgba(239, 233, 214, 0.4)',
-                }}
-              >
-                {label}
-              </div>
-            </div>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
+          <Stat label="LIVE" value={liveCount} accent />
+          <Stat label="TODAY" value={orders.length} />
+          <Stat label="REVENUE" value={`$${revenue}`} />
         </div>
+      </div>
 
-        {/* Orders table */}
-        <div style={{ border: '1px solid rgba(239, 233, 214, 0.08)' }}>
-          {/* Table header */}
+      <div style={{ padding: '0 32px 32px' }}>
+        <div className="mono" style={{ display: 'grid', gridTemplateColumns: '0.7fr 1.2fr 0.8fr 1.4fr 1.2fr 0.7fr 0.5fr', padding: '16px 0', borderBottom: '1px solid var(--ink)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+          <span>ORDER</span>
+          <span>EMAIL</span>
+          <span>TOTAL</span>
+          <span>ITEMS</span>
+          <span>CURRENT STEP</span>
+          <span>UPDATED</span>
+          <span />
+        </div>
+        {orders.map((o) => (
           <div
+            key={o.id}
+            className={pulse === o.id ? 'step-in' : ''}
             style={{
               display: 'grid',
-              gridTemplateColumns: '140px 1fr 80px 80px 160px 100px',
-              gap: '0',
-              padding: '10px 20px',
-              borderBottom: '1px solid rgba(239, 233, 214, 0.1)',
-              backgroundColor: '#231D27',
-            }}
-          >
-            {['Order ID', 'Product', 'Size', 'Amount', 'Customer', 'Status'].map((col) => (
-              <div
-                key={col}
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '9px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.12em',
-                  color: 'rgba(239, 233, 214, 0.35)',
-                }}
-              >
-                {col}
-              </div>
-            ))}
-          </div>
-
-          {/* Order rows */}
-          {orders.map((order, i) => (
-            <div
-              key={order.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '140px 1fr 80px 80px 160px 100px',
-                gap: '0',
-                padding: '14px 20px',
-                borderBottom: '1px solid rgba(239, 233, 214, 0.05)',
-                backgroundColor: i % 2 === 0 ? '#1A161C' : 'rgba(54, 44, 64, 0.15)',
-                alignItems: 'center',
-                transition: 'background-color 0.2s ease',
-              }}
-            >
-              {/* Order ID */}
-              <Link
-                href={`/orders/${order.id}`}
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '12px',
-                  color: '#FF7300',
-                  textDecoration: 'none',
-                }}
-              >
-                {order.id}
-              </Link>
-
-              {/* Product */}
-              <div>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    color: '#EFE9D6',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {order.product}
-                </div>
-              </div>
-
-              {/* Size */}
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '11px',
-                  color: 'rgba(239, 233, 214, 0.5)',
-                }}
-              >
-                {order.size ?? '—'}
-              </div>
-
-              {/* Amount */}
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '13px',
-                  color: '#EFE9D6',
-                }}
-              >
-                {formatPrice(order.amount)}
-              </div>
-
-              {/* Customer */}
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '11px',
-                  color: 'rgba(239, 233, 214, 0.4)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {order.email}
-              </div>
-
-              {/* Status */}
-              <div>
-                {/* Step progress mini-bar */}
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '2px',
-                    marginBottom: '4px',
-                  }}
-                >
-                  {Array.from({ length: 5 }).map((_, si) => (
-                    <div
-                      key={si}
-                      style={{
-                        height: '3px',
-                        flex: 1,
-                        backgroundColor:
-                          si < order.step
-                            ? STATUS_COLORS[order.status]
-                            : si === order.step && order.status !== 'complete'
-                            ? 'rgba(255, 115, 0, 0.4)'
-                            : 'rgba(239, 233, 214, 0.1)',
-                        transition: 'background-color 0.4s ease',
-                      }}
-                    />
-                  ))}
-                </div>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-space-mono, monospace)',
-                    fontSize: '9px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: STATUS_COLORS[order.status],
-                  }}
-                >
-                  {order.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Inngest Cloud link */}
-        <div
-          style={{
-            marginTop: '24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-          }}
-        >
-          <a
-            href="https://app.inngest.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: '#FF7300',
-              textDecoration: 'none',
-              display: 'flex',
+              gridTemplateColumns: '0.7fr 1.2fr 0.8fr 1.4fr 1.2fr 0.7fr 0.5fr',
+              padding: '16px 0',
+              borderBottom: '1px solid var(--rule-soft)',
               alignItems: 'center',
-              gap: '8px',
+              background: pulse === o.id ? 'rgba(255, 115, 0, 0.06)' : 'transparent',
+              transition: 'background 480ms',
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-            View all runs in Inngest Cloud →
-          </a>
-        </div>
+            <span className="mono tabnum" style={{ fontSize: 12 }}>{o.id}</span>
+            <span style={{ fontSize: 13 }}>{o.email}</span>
+            <span className="mono tabnum" style={{ fontSize: 12.5 }}>${o.total.toFixed(2)}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--ink)' }}>{o.items}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <StepDot status={o.status === 'complete' ? 'complete' : 'running'} />
+              <span className="mono" style={{ fontSize: 11.5 }}>{o.step}</span>
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{o.t}</span>
+            <span style={{ textAlign: 'right' }}>
+              <Link
+                href={`/orders/${o.id}`}
+                className="mono"
+                style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', padding: '6px 10px', border: '1px solid var(--ink)' }}
+              >
+                INSPECT →
+              </Link>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: number | string; accent?: boolean }) {
+  return (
+    <div style={{ background: accent ? 'var(--citrus)' : 'var(--paper)', padding: '20px 24px' }}>
+      <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: accent ? 'var(--nebula)' : 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {accent && <span className="live-dot" style={{ background: 'var(--nebula)' }} />}
+        {label}
+      </div>
+      <div className="display tabnum" style={{ fontSize: 44, fontWeight: 400, marginTop: 6, color: accent ? 'var(--nebula)' : 'var(--ink)' }}>
+        {value}
       </div>
     </div>
   );

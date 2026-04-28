@@ -118,9 +118,7 @@ export default function CatalogPage() {
           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
           {[
             { label: 'step.run("capture-payment")', state: 'done' },
-            { label: 'step.run("reserve-inventory")', state: 'done' },
-            { label: 'step.run("submit-to-fulfillment")', state: 'active' },
-            { label: 'step.run("generate-shipping-label")', state: 'pending' },
+            { label: 'step.run("reserve-inventory")', state: 'active' },
             { label: 'step.run("send-confirmation")', state: 'pending' },
           ].map((step, i) => (
             <div

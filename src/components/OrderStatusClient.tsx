@@ -11,12 +11,9 @@
 //
 // For the demo: auto-advances through steps on a timer to show the UI.
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { FULFILLMENT_STEPS, WorkflowStep, FulfillmentStatus } from '@/lib/catalog';
 import Link from 'next/link';
-
-// Step durations for the demo animation (ms)
-const STEP_DURATIONS = [1800, 2400, 3200, 2100, 1600];
 
 type StepState = WorkflowStep & { startedAt?: number; elapsed?: number };
 
@@ -118,43 +115,18 @@ function StatusIcon({ status }: { status: FulfillmentStatus }) {
 }
 
 export function OrderStatusClient({ orderId }: { orderId: string }) {
-  const [steps, setSteps] = useState<StepState[]>(
+  // LIVESTREAM TARGET (Block 3): The plugin will replace this static state
+  // with a live Inngest Realtime subscription on channel `order:{orderId}`.
+  // Each step.run() in fulfill-order.ts publishes { step, status, output } —
+  // the subscription updates the steps array and the panels below render live.
+  //
+  // TODO: subscribe to Realtime channel `order:${orderId}` and update steps
+  // via the incoming payload's { step, status, output } events.
+  const [steps] = useState<StepState[]>(
     FULFILLMENT_STEPS.map((s) => ({ ...s, status: 'pending' as FulfillmentStatus }))
   );
-  const [currentStep, setCurrentStep] = useState<number>(0);
-  const [allComplete, setAllComplete] = useState(false);
-  const [elapsedTotal, setElapsedTotal] = useState(0);
-
-  // Simulate step advancement
-  useEffect(() => {
-    if (currentStep >= FULFILLMENT_STEPS.length) {
-      setAllComplete(true);
-      return;
-    }
-
-    // Mark current step as running
-    setSteps((prev) =>
-      prev.map((s, i) =>
-        i === currentStep ? { ...s, status: 'running', startedAt: Date.now() } : s
-      )
-    );
-
-    const duration = STEP_DURATIONS[currentStep] ?? 2000;
-    const timer = setTimeout(() => {
-      // Mark current step complete
-      setSteps((prev) =>
-        prev.map((s, i) =>
-          i === currentStep
-            ? { ...s, status: 'complete', completedAt: new Date().toISOString(), duration }
-            : s
-        )
-      );
-      setElapsedTotal((t) => t + duration);
-      setCurrentStep((c) => c + 1);
-    }, duration);
-
-    return () => clearTimeout(timer);
-  }, [currentStep]);
+  const allComplete = false;
+  const elapsedTotal = 0;
 
   const completedCount = steps.filter((s) => s.status === 'complete').length;
   const progressPct = (completedCount / steps.length) * 100;

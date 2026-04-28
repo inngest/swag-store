@@ -21,8 +21,15 @@ export type Product = {
   id: string;
   slug: string;
   name: string;
+  type: string; // e.g., "T-Shirt", "Hoodie"
+  sku: string; // public SKU code, e.g., "INN-TEE-01"
   tagline: string;
+  blurb: string; // 1-line product card hook
   description: string;
+  fabric: string;
+  fit: string;
+  cornerTag: string; // editorial corner label, e.g., "01 / TEE"
+  cover: 'dark' | 'citrus' | 'light';
   price: number; // in cents
   category: 'apparel' | 'accessories';
   image: string;
@@ -82,9 +89,16 @@ export const PRODUCTS: Product[] = [
     id: 'prod_durably-yours-tee',
     slug: 'durably-yours-tee',
     name: 'Durably Yours',
+    type: 'T-Shirt',
+    sku: 'INN-TEE-01',
     tagline: 'The T-shirt that never drops a step.',
+    blurb: 'Heavyweight cotton tee. Front: Inngest mark. Back: workflow diagram printed in Citrus Glow.',
     description:
-      '100% heavyweight ring-spun cotton. DURABLY YOURS printed in Citrus Glow on heather grey. The shirt you wear when you give a talk about why other queues are bad.',
+      'A 6.1 oz combed cotton tee, garment-dyed for that lived-in feel after the first wash. The back print is a real Inngest workflow — not decorative, not invented — captured from a production run on Apr 12. Made in Los Angeles.',
+    fabric: '100% combed cotton, 6.1oz',
+    fit: 'Boxy, true to size',
+    cornerTag: '01 / TEE',
+    cover: 'dark',
     price: 2800,
     category: 'apparel',
     image: '/products/shirt-grey.png',
@@ -108,9 +122,16 @@ export const PRODUCTS: Product[] = [
     id: 'prod_inngest-hoodie',
     slug: 'inngest-hoodie',
     name: 'Inngest Hoodie',
+    type: 'Hoodie',
+    sku: 'INN-HOOD-01',
     tagline: 'Citrus Glow on Quantum. Retry-proof warmth.',
+    blurb: 'Heavyweight 14oz fleece. Embroidered mark, screen-printed mono lockup at hem.',
     description:
-      'Premium 80/20 cotton-poly fleece. INNGEST wordmark across the chest in Citrus Glow. The hoodie that survives long-running processes and cold server rooms alike.',
+      'A 14 oz brushed-back fleece hoodie with embroidered chest mark and a mono-spaced step.run() lockup printed along the hem. Heavy enough to feel like outerwear; soft enough to live in. Pre-shrunk.',
+    fabric: '80% cotton / 20% poly fleece, 14oz',
+    fit: 'Relaxed, size up for oversized',
+    cornerTag: '02 / HOOD',
+    cover: 'citrus',
     price: 5800,
     category: 'apparel',
     image: '/products/hoodie-orange.png',
@@ -133,9 +154,16 @@ export const PRODUCTS: Product[] = [
     id: 'prod_step-function-sticker-pack',
     slug: 'step-function-sticker-pack',
     name: 'Step Function',
+    type: 'Sticker Pack',
+    sku: 'INN-STK-01',
     tagline: '8 stickers. 0 dropped steps.',
+    blurb: 'Eight die-cut vinyl stickers. Logos, marks, and one easter egg.',
     description:
-      'Eight die-cut vinyl stickers. step.run(), step.waitForEvent(), step.sleep(), and more. UV-resistant, laptop-safe, dishwasher-proof. Because your code should be too.',
+      'Eight matte-vinyl die-cut stickers, weatherproof and dishwasher-safe. Includes the wordmark, the M-mark in three colorways, two workflow glyphs, a step.run() bumper, and one secret design we will not describe here.',
+    fabric: 'Matte vinyl, 3M adhesive',
+    fit: '8 stickers, ~3in each',
+    cornerTag: '03 / STK',
+    cover: 'light',
     price: 1200,
     category: 'accessories',
     image: '/products/stickers-cream.png',
@@ -150,9 +178,16 @@ export const PRODUCTS: Product[] = [
     id: 'prod_inngest-hat',
     slug: 'inngest-hat',
     name: 'Inngest Hat',
+    type: 'Hat',
+    sku: 'INN-HAT-01',
     tagline: 'Eon Moss. Embroidered mark.',
+    blurb: 'Six-panel structured cap. Embroidered mark, low-profile fit.',
     description:
-      'Six-panel structured cap, Eon Moss colorway. Embroidered Inngest mark on the front, low-profile fit. The hat for the engineer who keeps the build green.',
+      'Six-panel structured cap in Eon Moss. Embroidered Inngest mark on the front panel, brass slide-buckle adjustable strap, low-profile crown. The hat for the engineer who keeps the build green.',
+    fabric: '100% washed cotton twill',
+    fit: 'One size, adjustable',
+    cornerTag: '04 / HAT',
+    cover: 'light',
     price: 2400,
     category: 'accessories',
     image: '/products/hat-moss.png',

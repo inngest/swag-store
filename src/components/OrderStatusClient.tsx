@@ -1,592 +1,243 @@
 'use client';
 
 // ─── Order Status Page — THE INNGEST MONEYSHOT ──────────────────────────────
-// This is the centerpiece of the livestream demo. It shows a real-time view
-// of the Inngest durable workflow executing after checkout.
+// This page shows live execution of the Inngest fulfill-order durable function.
 //
-// In production:
-//   - Poll GET /api/orders/:id/status (which reads from Inngest run status)
-//   - Or use Inngest Realtime (step.waitForEvent with SSE) to push updates
-//   - Each step maps to a step.run() call in the inngest/functions/fulfill-order.ts
+// LIVESTREAM TARGET (Block 3): The plugin will subscribe this client to the
+// Inngest Realtime channel `order:{orderId}` and replace the static state below
+// with live updates. Each step.run() in fulfill-order.ts publishes a Realtime
+// event with { step, status, output } and the four panels render off that.
 //
-// For the demo: auto-advances through steps on a timer to show the UI.
+// The four panels:
+//   1. Step tracker — animates through pending → running → complete
+//   2. Per-step JSON output reveal — shows what each step returned
+//   3. Realtime log panel — vertical timeline of events
+//   4. Source view — fulfill-order.ts with active step highlighted in citrus
 
-import { useState } from 'react';
-import { FULFILLMENT_STEPS, WorkflowStep, FulfillmentStatus } from '@/lib/catalog';
-import Link from 'next/link';
+import * as React from 'react';
+import { StepDot } from './atoms/WorkflowTracker';
 
-type StepState = WorkflowStep & { startedAt?: number; elapsed?: number };
+const STEPS = [
+  {
+    name: 'capture-payment',
+    detail: 'stripe.payment_intents.retrieve',
+    output: { id: 'pi_3OxYz1', amount: 4200, currency: 'usd', status: 'pending' },
+  },
+  {
+    name: 'reserve-inventory',
+    detail: 'inventory.decrement(sku, qty)',
+    output: { sku: 'INN-TEE-01', reserved: 0, remaining: 0 },
+  },
+  {
+    name: 'send-confirmation',
+    detail: 'email.send(template: "order_confirmation")',
+    output: { messageId: '', to: '', status: 'pending' },
+  },
+];
 
-function StatusIcon({ status }: { status: FulfillmentStatus }) {
-  if (status === 'complete') {
-    return (
-      <div
-        style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(89, 165, 105, 0.15)',
-          border: '1px solid #59A569',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#59A569',
-          flexShrink: 0,
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-      </div>
-    );
-  }
-  if (status === 'running') {
-    return (
-      <div
-        style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(255, 115, 0, 0.1)',
-          border: '1px solid #FF7300',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}
-      >
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-        <div
-          style={{
-            width: '14px',
-            height: '14px',
-            border: '2px solid rgba(255, 115, 0, 0.2)',
-            borderTopColor: '#FF7300',
-            borderRadius: '50%',
-            animation: 'spin 0.7s linear infinite',
-          }}
-        />
-      </div>
-    );
-  }
-  if (status === 'failed') {
-    return (
-      <div
-        style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(255, 68, 68, 0.1)',
-          border: '1px solid #FF4444',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#FF4444',
-          flexShrink: 0,
-        }}
-      >
-        ✕
-      </div>
-    );
-  }
+export function OrderStatusClient({ orderId }: { orderId: string }) {
+  // TODO (livestream Block 3): replace static state with Realtime subscription.
+  // const { data } = useInngestSubscription({ refreshToken: () => fetchOrderSubscriptionToken(orderId) });
+  // Fold `data` into stepStatus + logs + completedDurations below.
+  const stepStatus: Array<'complete' | 'running' | 'pending'> = ['pending', 'pending', 'pending'];
+  const logs: Array<{ ts: string; level: string; msg: string }> = [
+    { ts: '00:00.000', level: 'INFO', msg: 'awaiting store/order.placed event' },
+  ];
+  const completedDurations: string[] = [];
+  const allDone = stepStatus.every((s) => s === 'complete');
+  const activeIdx = stepStatus.findIndex((s) => s === 'running');
+  const [open, setOpen] = React.useState(true);
+
   return (
-    <div
-      style={{
-        width: '32px',
-        height: '32px',
-        borderRadius: '50%',
-        border: '1px solid rgba(239, 233, 214, 0.15)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}
-    >
-      <div
-        style={{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(239, 233, 214, 0.2)',
-        }}
-      />
+    <div>
+      {/* ─── Header ─── */}
+      <div style={{ background: 'var(--nebula)', color: 'var(--paper)', borderBottom: '1px solid var(--ink)' }}>
+        <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid rgba(245, 240, 232, 0.1)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(245, 240, 232, 0.6)' }}>
+          <a href="/">← STORE</a>
+          <span>06 / ORDER STATUS · {orderId}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span className="live-dot" />
+            CHANNEL · order:{orderId}
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', padding: '40px 32px', gap: 32 }}>
+          <div>
+            <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--citrus)', marginBottom: 18 }}>
+              {allDone ? 'FULFILLED' : 'IN PROGRESS · LIVE'}
+            </div>
+            <h1 className="display" style={{ fontSize: 'clamp(64px, 9vw, 144px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
+              {allDone ? 'Shipped.' : 'Shipping…'}
+            </h1>
+            <p style={{ fontSize: 15, lineHeight: 1.55, maxWidth: 520, marginTop: 24, color: 'rgba(245, 240, 232, 0.78)' }}>
+              You&apos;re watching the live execution of <span className="mono">fulfill-order.ts</span>, an Inngest durable function. Each step is independently retried, persisted, and observable. This page subscribes to Realtime channel <span className="mono">order:{orderId}</span>.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8 }}>
+            <OrderMetric label="ORDER ID" value={orderId} mono />
+            <OrderMetric label="ITEMS" value="2 ITEMS · DURABLY YOURS TEE, INNGEST HAT" />
+            <OrderMetric label="TOTAL" value="$42.00 USD" mono />
+            <OrderMetric label="ETA" value="3—5 BUSINESS DAYS · USPS" />
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Step tracker ─── */}
+      <div style={{ borderBottom: '1px solid var(--ink)' }}>
+        <div style={{ padding: '32px' }}>
+          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 20, display: 'flex', justifyContent: 'space-between' }}>
+            <span>6.1 DURABLE STEPS · {stepStatus.filter((s) => s === 'complete').length} OF {STEPS.length}</span>
+            <span>FUNCTION ID · fulfill-order · attempt 1</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${STEPS.length}, 1fr)`, gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
+            {STEPS.map((s, i) => (
+              <StepCard key={s.name} index={i} step={s} status={stepStatus[i]} duration={completedDurations[i]} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Realtime log + code ─── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--ink)' }}>
+        <div style={{ borderRight: '1px solid var(--ink)', padding: '32px' }}>
+          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>6.2 REALTIME LOG · @inngest/realtime</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="live-dot" />SUBSCRIBED
+            </span>
+          </div>
+          <div style={{ background: 'var(--nebula)', padding: 18, minHeight: 280, fontFamily: 'JetBrains Mono', fontSize: 11.5, color: '#E8E3DD', lineHeight: 1.7 }}>
+            {logs.map((l, i) => (
+              <div key={i} className="step-in" style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', gap: 12 }}>
+                <span style={{ color: '#6B6670' }}>{l.ts}</span>
+                <span style={{ color: l.level === 'INFO' ? 'var(--citrus)' : '#E8E3DD' }}>{l.level}</span>
+                <span>{l.msg}</span>
+              </div>
+            ))}
+            {!allDone && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', gap: 12, opacity: 0.5 }}>
+                <span style={{ color: '#6B6670' }}>—</span>
+                <span style={{ color: 'var(--citrus)' }}>···</span>
+                <span>awaiting next event</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: '32px' }}>
+          <div
+            className="mono"
+            style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 14, display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <span>6.3 SOURCE · src/inngest/functions/fulfill-order.ts</span>
+            <span>{open ? '− COLLAPSE' : '+ EXPAND'}</span>
+          </div>
+          {open && <CodeBlock activeIdx={Math.max(0, activeIdx)} />}
+        </div>
+      </div>
     </div>
   );
 }
 
-export function OrderStatusClient({ orderId }: { orderId: string }) {
-  // LIVESTREAM TARGET (Block 3): The plugin will replace this static state
-  // with a live Inngest Realtime subscription on channel `order:{orderId}`.
-  // Each step.run() in fulfill-order.ts publishes { step, status, output } —
-  // the subscription updates the steps array and the panels below render live.
-  //
-  // TODO: subscribe to Realtime channel `order:${orderId}` and update steps
-  // via the incoming payload's { step, status, output } events.
-  const [steps] = useState<StepState[]>(
-    FULFILLMENT_STEPS.map((s) => ({ ...s, status: 'pending' as FulfillmentStatus }))
-  );
-  const allComplete = false;
-  const elapsedTotal = 0;
-
-  const completedCount = steps.filter((s) => s.status === 'complete').length;
-  const progressPct = (completedCount / steps.length) * 100;
-
+function OrderMetric({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ backgroundColor: '#1A161C', minHeight: 'calc(100vh - 56px)' }}>
-      <div
-        style={{
-          maxWidth: '900px',
-          margin: '0 auto',
-          padding: '48px 24px',
-        }}
-      >
-        {/* ─── Header ─── */}
-        <div style={{ marginBottom: '48px' }}>
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              color: '#FF7300',
-              marginBottom: '8px',
-            }}
-          >
-            Order Status
-          </div>
-          <h1
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontWeight: '700',
-              fontSize: 'clamp(32px, 5vw, 48px)',
-              textTransform: 'uppercase',
-              letterSpacing: '-0.02em',
-              color: '#EFE9D6',
-              margin: '0 0 8px',
-            }}
-          >
-            {allComplete ? 'Order Confirmed' : 'Processing Order'}
-          </h1>
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '12px',
-              color: 'rgba(239, 233, 214, 0.4)',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {orderId}
-          </div>
-        </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 16, alignItems: 'baseline', borderBottom: '1px solid rgba(245, 240, 232, 0.1)', padding: '8px 0' }}>
+      <span className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(245, 240, 232, 0.5)', minWidth: 64 }}>{label}</span>
+      <span className={mono ? 'mono' : 'display'} style={{ fontSize: mono ? 13 : 14, color: 'var(--paper)', fontWeight: mono ? 400 : 500 }}>{value}</span>
+    </div>
+  );
+}
 
-        {/* ─── Two-column layout ─── */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 320px',
-            gap: '40px',
-            alignItems: 'start',
-          }}
-        >
-          {/* ─── Left: Workflow Steps ─── */}
-          <div>
-            {/* Inngest branding header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '20px',
-                paddingBottom: '16px',
-                borderBottom: '1px solid rgba(239, 233, 214, 0.1)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF7300" strokeWidth="2">
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                </svg>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-space-mono, monospace)',
-                    fontSize: '10px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    color: '#FF7300',
-                  }}
-                >
-                  Inngest Workflow — fulfill-order
-                </span>
-              </div>
-              <span
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: allComplete ? '#59A569' : 'rgba(239, 233, 214, 0.35)',
-                }}
-              >
-                {completedCount}/{steps.length} steps
-              </span>
-            </div>
-
-            {/* Progress bar */}
-            <div
-              style={{
-                width: '100%',
-                height: '2px',
-                backgroundColor: 'rgba(239, 233, 214, 0.08)',
-                marginBottom: '28px',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  height: '100%',
-                  width: `${progressPct}%`,
-                  backgroundColor: '#FF7300',
-                  transition: 'width 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-                }}
-              />
-            </div>
-
-            {/* Steps */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {steps.map((step, i) => (
-                <div
-                  key={step.id}
-                  style={{
-                    display: 'flex',
-                    gap: '16px',
-                    padding: '16px 20px',
-                    backgroundColor:
-                      step.status === 'running'
-                        ? 'rgba(255, 115, 0, 0.05)'
-                        : step.status === 'complete'
-                        ? 'rgba(89, 165, 105, 0.03)'
-                        : 'rgba(54, 44, 64, 0.2)',
-                    borderLeft: `2px solid ${
-                      step.status === 'complete'
-                        ? '#59A569'
-                        : step.status === 'running'
-                        ? '#FF7300'
-                        : step.status === 'failed'
-                        ? '#FF4444'
-                        : 'rgba(239, 233, 214, 0.08)'
-                    }`,
-                    transition: 'all 0.3s ease',
-                  }}
-                >
-                  <StatusIcon status={step.status} />
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Step function name */}
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-space-mono, monospace)',
-                        fontSize: '13px',
-                        color:
-                          step.status === 'complete'
-                            ? '#59A569'
-                            : step.status === 'running'
-                            ? '#FF7300'
-                            : step.status === 'failed'
-                            ? '#FF4444'
-                            : 'rgba(239, 233, 214, 0.25)',
-                        marginBottom: '4px',
-                        letterSpacing: '0',
-                      }}
-                    >
-                      {step.name}
-                    </div>
-                    {/* Description */}
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                        fontSize: '13px',
-                        color:
-                          step.status === 'pending'
-                            ? 'rgba(239, 233, 214, 0.2)'
-                            : 'rgba(239, 233, 214, 0.55)',
-                      }}
-                    >
-                      {step.description}
-                    </div>
-                  </div>
-
-                  {/* Duration / status badge */}
-                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                    {step.status === 'complete' && step.duration && (
-                      <span
-                        style={{
-                          fontFamily: 'var(--font-space-mono, monospace)',
-                          fontSize: '10px',
-                          color: 'rgba(239, 233, 214, 0.3)',
-                          letterSpacing: '0.05em',
-                        }}
-                      >
-                        {(step.duration / 1000).toFixed(1)}s
-                      </span>
-                    )}
-                    {step.status === 'running' && (
-                      <span
-                        style={{
-                          fontFamily: 'var(--font-space-mono, monospace)',
-                          fontSize: '10px',
-                          color: '#FF7300',
-                          letterSpacing: '0.05em',
-                        }}
-                      >
-                        running...
-                      </span>
-                    )}
-                    {step.status === 'pending' && (
-                      <span
-                        style={{
-                          fontFamily: 'var(--font-space-mono, monospace)',
-                          fontSize: '10px',
-                          color: 'rgba(239, 233, 214, 0.15)',
-                          letterSpacing: '0.05em',
-                        }}
-                      >
-                        queued
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Code block — the actual Inngest function signature */}
-            <div
-              style={{
-                marginTop: '28px',
-                padding: '20px',
-                backgroundColor: '#231D27',
-                border: '1px solid rgba(239, 233, 214, 0.08)',
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '12px',
-                lineHeight: '1.7',
-                color: 'rgba(239, 233, 214, 0.5)',
-                overflowX: 'auto',
-              }}
-            >
-              <div style={{ marginBottom: '4px', color: 'rgba(239, 233, 214, 0.25)', fontSize: '10px' }}>
-                // inngest/functions/fulfill-order.ts
-              </div>
-              <div>
-                <span style={{ color: '#59A569' }}>export const</span>{' '}
-                <span style={{ color: '#EFE9D6' }}>fulfillOrder</span>{' '}
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>=</span>{' '}
-                <span style={{ color: '#CBB26A' }}>inngest</span>
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>.</span>
-                <span style={{ color: '#FF7300' }}>createFunction</span>
-                <span style={{ color: 'rgba(239, 233, 214, 0.5)' }}>(</span>
-              </div>
-              <div style={{ paddingLeft: '16px' }}>
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>{'{ id: '}</span>
-                <span style={{ color: '#CBB26A' }}>&ldquo;fulfill-order&rdquo;</span>
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>{' },'}</span>
-              </div>
-              <div style={{ paddingLeft: '16px' }}>
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>{'{ event: '}</span>
-                <span style={{ color: '#CBB26A' }}>&ldquo;store/order.placed&rdquo;</span>
-                <span style={{ color: 'rgba(239, 233, 214, 0.4)' }}>{' },'}</span>
-              </div>
-              <div style={{ paddingLeft: '16px' }}>
-                <span style={{ color: '#FF7300' }}>async</span>
-                <span style={{ color: 'rgba(239, 233, 214, 0.5)' }}>{' ({ event, step }) => {'}</span>
-              </div>
-              {steps.map((s, i) => (
-                <div
-                  key={s.id}
-                  style={{
-                    paddingLeft: '32px',
-                    color:
-                      s.status === 'complete'
-                        ? '#59A569'
-                        : s.status === 'running'
-                        ? '#FF7300'
-                        : 'rgba(239, 233, 214, 0.2)',
-                    transition: 'color 0.3s ease',
-                  }}
-                >
-                  {s.name.replace('step.run(', 'await step.run(').replace(')', ', handler)')}
-                </div>
-              ))}
-              <div style={{ paddingLeft: '16px' }}>
-                <span style={{ color: 'rgba(239, 233, 214, 0.5)' }}>{'}'}</span>
-              </div>
-              <span style={{ color: 'rgba(239, 233, 214, 0.5)' }}>)</span>
-            </div>
-          </div>
-
-          {/* ─── Right: Order Summary + Status ─── */}
-          <div>
-            {/* Overall status card */}
-            <div
-              style={{
-                padding: '24px',
-                border: `1px solid ${allComplete ? 'rgba(89, 165, 105, 0.3)' : 'rgba(255, 115, 0, 0.2)'}`,
-                backgroundColor: allComplete ? 'rgba(89, 165, 105, 0.05)' : 'rgba(255, 115, 0, 0.04)',
-                marginBottom: '20px',
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.12em',
-                  color: allComplete ? '#59A569' : '#FF7300',
-                  marginBottom: '8px',
-                }}
-              >
-                {allComplete ? 'Complete' : 'In Progress'}
-              </div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                  fontWeight: '700',
-                  fontSize: '22px',
-                  textTransform: 'uppercase',
-                  color: '#EFE9D6',
-                }}
-              >
-                {allComplete ? 'Order Fulfilled' : 'Fulfilling...'}
-              </div>
-              {allComplete && (
-                <p
-                  style={{
-                    fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                    fontSize: '13px',
-                    color: 'rgba(239, 233, 214, 0.55)',
-                    margin: '8px 0 0',
-                  }}
-                >
-                  Confirmation email sent. Your swag is on its way.
-                </p>
-              )}
-            </div>
-
-            {/* Order meta */}
-            <div
-              style={{
-                padding: '20px',
-                border: '1px solid rgba(239, 233, 214, 0.08)',
-                marginBottom: '16px',
-              }}
-            >
-              {[
-                { label: 'Order ID', value: orderId },
-                { label: 'Placed', value: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) },
-                { label: 'Steps Complete', value: `${completedCount} / ${steps.length}` },
-                { label: 'Workflow', value: 'fulfill-order' },
-              ].map(({ label, value }) => (
-                <div
-                  key={label}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 0',
-                    borderBottom: '1px solid rgba(239, 233, 214, 0.06)',
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-space-mono, monospace)',
-                      fontSize: '10px',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: 'rgba(239, 233, 214, 0.35)',
-                    }}
-                  >
-                    {label}
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-space-mono, monospace)',
-                      fontSize: '11px',
-                      color: label === 'Workflow' ? '#FF7300' : '#EFE9D6',
-                    }}
-                  >
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Inngest cloud link */}
-            <a
-              href="https://app.inngest.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'block',
-                padding: '12px 16px',
-                border: '1px solid rgba(255, 115, 0, 0.2)',
-                backgroundColor: 'rgba(255, 115, 0, 0.04)',
-                textDecoration: 'none',
-                marginBottom: '16px',
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  color: '#FF7300',
-                  marginBottom: '4px',
-                }}
-              >
-                View in Inngest Cloud →
-              </div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                  fontSize: '12px',
-                  color: 'rgba(239, 233, 214, 0.4)',
-                }}
-              >
-                Full run trace, step outputs, retry history
-              </div>
-            </a>
-
-            {allComplete && (
-              <Link
-                href="/"
-                style={{
-                  display: 'block',
-                  textAlign: 'center',
-                  padding: '14px',
-                  backgroundColor: '#FF7300',
-                  color: '#1A161C',
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.12em',
-                  textDecoration: 'none',
-                }}
-              >
-                Shop More →
-              </Link>
-            )}
-          </div>
+function StepCard({
+  index,
+  step,
+  status,
+  duration,
+}: {
+  index: number;
+  step: { name: string; detail: string; output: Record<string, unknown> };
+  status: 'complete' | 'running' | 'pending';
+  duration?: string;
+}) {
+  return (
+    <div style={{ background: 'var(--paper)', padding: '24px 22px', position: 'relative', minHeight: 200 }}>
+      <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
+        <span>STEP {String(index + 1).padStart(2, '0')} / 03</span>
+        <span style={{ color: status === 'running' ? 'var(--citrus)' : status === 'complete' ? 'var(--ink)' : 'var(--muted)' }}>
+          {status === 'complete' ? '✓ COMPLETE' : status === 'running' ? 'RUNNING' : 'PENDING'}
+        </span>
+      </div>
+      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <StepDot status={status} />
+        <div className="display" style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.05 }}>
+          {step.name}
         </div>
       </div>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+        {step.detail}
+      </div>
+
+      {status === 'running' && (
+        <div style={{ marginTop: 18, position: 'relative', height: 4, background: 'var(--rule-soft)', overflow: 'hidden' }}>
+          <div className="load-bar" style={{ position: 'absolute', inset: 0 }} />
+        </div>
+      )}
+
+      {status === 'complete' && (
+        <div className="step-in" style={{ marginTop: 18, padding: '10px 12px', background: 'var(--bone)', borderLeft: '2px solid var(--ok)' }}>
+          <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 4 }}>
+            OUTPUT {duration ? `· ${duration}s` : ''}
+          </div>
+          <pre className="mono" style={{ fontSize: 10.5, lineHeight: 1.55, margin: 0, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(step.output, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {status === 'pending' && (
+        <div className="mono" style={{ marginTop: 14, fontSize: 11, color: 'var(--muted)' }}>
+          Awaiting upstream step
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeBlock({ activeIdx }: { activeIdx: number }) {
+  type Tok = [string, string];
+  type Line = { tokens: Tok[]; stepIdx?: number };
+  const lines: Line[] = [
+    { tokens: [['kw', 'import'], ['pun', ' { '], ['fn', 'inngest'], ['pun', ' } '], ['kw', 'from'], ['str', ' "@/inngest/client"']] },
+    { tokens: [] },
+    { tokens: [['kw', 'export const'], ['fn', ' fulfillOrder'], ['pun', ' = inngest.'], ['fn', 'createFunction'], ['pun', '(']] },
+    { tokens: [['pun', '  { '], ['fn', 'id'], ['pun', ': '], ['str', '"fulfill-order"'], ['pun', ' },']] },
+    { tokens: [['pun', '  { '], ['fn', 'event'], ['pun', ': '], ['str', '"store/order.placed"'], ['pun', ' },']] },
+    { tokens: [['kw', '  async'], ['pun', ' ({ '], ['fn', 'event'], ['pun', ', '], ['fn', 'step'], ['pun', ', '], ['fn', 'publish'], ['pun', ' }) => {']] },
+    { tokens: [['com', '    // 1 — capture the Stripe payment']], stepIdx: 0 },
+    { tokens: [['kw', '    const'], ['fn', ' payment'], ['pun', ' = '], ['kw', 'await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"capture-payment"'], ['pun', ', ...);']], stepIdx: 0 },
+    { tokens: [] },
+    { tokens: [['com', '    // 2 — reserve inventory']], stepIdx: 1 },
+    { tokens: [['kw', '    await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"reserve-inventory"'], ['pun', ', ...);']], stepIdx: 1 },
+    { tokens: [] },
+    { tokens: [['com', '    // 3 — send confirmation email']], stepIdx: 2 },
+    { tokens: [['kw', '    await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"send-confirmation"'], ['pun', ', ...);']], stepIdx: 2 },
+    { tokens: [] },
+    { tokens: [['pun', '  }']] },
+    { tokens: [['pun', ');']] },
+  ];
+
+  return (
+    <div className="code-block square">
+      {lines.map((l, i) => {
+        const isActive = l.stepIdx === activeIdx;
+        return (
+          <span key={i} className={`code-line ${isActive ? 'active' : ''}`}>
+            {l.tokens.length === 0 ? ' ' : l.tokens.map((t, j) => (
+              <span key={j} className={`tok-${t[0]}`}>{t[1]}</span>
+            ))}
+          </span>
+        );
+      })}
     </div>
   );
 }

@@ -1,458 +1,156 @@
 'use client';
 
+import * as React from 'react';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { useCart } from '@/lib/cart-context';
 import { PRODUCTS, formatPrice } from '@/lib/catalog';
 import { useRouter } from 'next/navigation';
+import { StepDot } from './atoms/WorkflowTracker';
 
-// ─── Checkout Page ────────────────────────────────────────────────────────
-// Shows order summary and a "Proceed to Payment" button.
-// In production: POST /api/checkout → creates Stripe Checkout Session → redirect.
-// The loading state between clicking and Stripe redirect is what we design here.
-
-type CheckoutStep = 'review' | 'redirecting' | 'error';
+type Stage = 'review' | 'creating' | 'redirecting';
 
 export function CheckoutClient() {
-  const { state, clearCart } = useCart();
+  const { state } = useCart();
   const router = useRouter();
-  const [step, setStep] = useState<CheckoutStep>('review');
+  const [stage, setStage] = useState<Stage>('review');
 
   const lineItems = state.items.map((item) => {
     const product = PRODUCTS.find((p) => p.id === item.productId);
     return { ...item, product };
   });
 
-  const subtotal = lineItems.reduce(
-    (sum, item) => sum + (item.product?.price ?? 0) * item.quantity,
-    0
-  );
-  const shipping = subtotal > 7500 ? 0 : 799;
-  const total = subtotal + shipping;
+  const subtotalCents = lineItems.reduce((s, it) => s + (it.product?.price ?? 0) * it.quantity, 0);
+  const subtotal = subtotalCents / 100;
+  const tax = +(subtotal * 0.0875).toFixed(2);
+  const shipping = subtotal > 40 ? 0 : 6;
+  const total = +(subtotal + tax + shipping).toFixed(2);
 
-  const handlePay = async () => {
-    setStep('redirecting');
+  useEffect(() => {
+    if (stage === 'creating') {
+      const t = setTimeout(() => setStage('redirecting'), 1400);
+      return () => clearTimeout(t);
+    }
+    if (stage === 'redirecting') {
+      const t = setTimeout(() => router.push(`/orders/confirmation?ord=ord_${Date.now()}`), 1800);
+      return () => clearTimeout(t);
+    }
+  }, [stage, router]);
 
-    // Simulate API call to create Stripe session
-    // In production: const { url } = await fetch('/api/checkout').then(r => r.json());
-    // window.location.href = url;
-
-    // For demo: simulate 2s redirect delay then go to order confirmation
-    await new Promise((r) => setTimeout(r, 2000));
-    const orderId = `ORD-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-    clearCart();
-    router.push(`/orders/${orderId}`);
-  };
-
-  if (state.items.length === 0 && step === 'review') {
+  if (lineItems.length === 0) {
     return (
-      <div
-        style={{
-          backgroundColor: '#1A161C',
-          minHeight: 'calc(100vh - 56px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <p
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: 'rgba(239, 233, 214, 0.4)',
-              marginBottom: '24px',
-            }}
-          >
-            Your cart is empty
-          </p>
-          <a
-            href="/"
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: '#FF7300',
-              textDecoration: 'none',
-            }}
-          >
-            ← Back to Catalog
-          </a>
-        </div>
+      <div style={{ padding: '80px 32px', textAlign: 'center' }}>
+        <h1 className="display" style={{ fontSize: 56, fontWeight: 400, textTransform: 'uppercase' }}>Empty cart.</h1>
+        <a href="/" className="btn btn-primary square" style={{ marginTop: 24, display: 'inline-block' }}>BACK TO CATALOG</a>
       </div>
     );
   }
 
-  // ─── Stripe Redirect Loading State ──────────────────────────────────────
-  if (step === 'redirecting') {
-    return (
-      <div
-        style={{
-          backgroundColor: '#1A161C',
-          minHeight: 'calc(100vh - 56px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'column',
-          gap: '32px',
-        }}
-      >
-        <style>{`
-          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-          @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        `}</style>
-
-        {/* Spinner */}
-        <div
-          style={{
-            width: '48px',
-            height: '48px',
-            border: '2px solid rgba(239, 233, 214, 0.1)',
-            borderTopColor: '#FF7300',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
-
-        <div style={{ textAlign: 'center', animation: 'fadeIn 0.4s ease both' }}>
-          <div
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontWeight: '700',
-              fontSize: '24px',
-              textTransform: 'uppercase',
-              color: '#EFE9D6',
-              marginBottom: '8px',
-            }}
-          >
-            Preparing Checkout
-          </div>
-          <p
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: 'rgba(239, 233, 214, 0.4)',
-            }}
-          >
-            Redirecting to Stripe Checkout...
-          </p>
-        </div>
-
-        {/* Stripe trust badge */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 16px',
-            border: '1px solid rgba(239, 233, 214, 0.1)',
-            color: 'rgba(239, 233, 214, 0.4)',
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="1" y="4" width="22" height="16" rx="2" />
-            <line x1="1" y1="10" x2="23" y2="10" />
-          </svg>
-          <span
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Secured by Stripe
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Order Review ────────────────────────────────────────────────────────
   return (
-    <div style={{ backgroundColor: '#1A161C', minHeight: 'calc(100vh - 56px)' }}>
-      <div
-        style={{
-          maxWidth: '900px',
-          margin: '0 auto',
-          padding: '48px 24px',
-          display: 'grid',
-          gridTemplateColumns: '1fr 360px',
-          gap: '48px',
-          alignItems: 'start',
-        }}
-      >
-        {/* ─── Left: Order Summary ─── */}
-        <div>
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              color: '#FF7300',
-              marginBottom: '8px',
-            }}
-          >
-            Review Order
-          </div>
-          <h1
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontWeight: '700',
-              fontSize: '36px',
-              textTransform: 'uppercase',
-              color: '#EFE9D6',
-              margin: '0 0 32px',
-            }}
-          >
-            Your Cart
-          </h1>
+    <div>
+      <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+        <a href="/">← BACK</a>
+        <span>05 / CHECKOUT</span>
+      </div>
 
-          {/* Line items */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-            {lineItems.map((item, i) => (
-              <div
-                key={item.variantId}
-                style={{
-                  display: 'flex',
-                  gap: '20px',
-                  padding: '20px 0',
-                  borderBottom: '1px solid rgba(239, 233, 214, 0.08)',
-                }}
-              >
-                {/* Image */}
-                <div
-                  style={{
-                    width: '80px',
-                    height: '80px',
-                    flexShrink: 0,
-                    background: item.product?.imagePlaceholder ?? '#362C40',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <span style={{ fontSize: '32px', opacity: 0.3 }}>
-                    {item.product?.category === 'apparel' ? '👕' : '🏷️'}
-                  </span>
-                </div>
-
-                {/* Info */}
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                      fontWeight: '700',
-                      fontSize: '16px',
-                      textTransform: 'uppercase',
-                      color: '#EFE9D6',
-                      marginBottom: '4px',
-                    }}
-                  >
-                    {item.product?.name}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--ink)', minHeight: 600 }}>
+        <div style={{ padding: '48px 40px', borderRight: '1px solid var(--ink)' }}>
+          <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>5.1 ORDER REVIEW</div>
+          <h2 className="display" style={{ fontSize: 56, fontWeight: 400, lineHeight: 0.92, textTransform: 'uppercase', margin: '8px 0 24px' }}>
+            One last<br />look.
+          </h2>
+          <div>
+            {lineItems.map((it) => {
+              const p = it.product;
+              if (!p) return null;
+              return (
+                <div key={it.variantId} style={{ display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)' }}>
+                  <div style={{ aspectRatio: '1/1', border: '1px solid var(--ink)', position: 'relative', background: 'var(--bone)' }}>
+                    {p.image && <Image src={p.image} alt={p.name} fill sizes="60px" style={{ objectFit: 'cover' }} />}
                   </div>
-                  {item.size && (
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-space-mono, monospace)',
-                        fontSize: '10px',
-                        textTransform: 'uppercase',
-                        color: 'rgba(239, 233, 214, 0.4)',
-                        letterSpacing: '0.08em',
-                      }}
-                    >
-                      Size: {item.size} · Qty: {item.quantity}
+                  <div>
+                    <div className="display" style={{ fontSize: 14, fontWeight: 500 }}>{p.name} × {it.quantity}</div>
+                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
+                      {it.size}
+                      {it.color ? ` · ${it.color}` : ''}
                     </div>
-                  )}
+                  </div>
+                  <div className="mono tabnum" style={{ fontSize: 13 }}>{formatPrice(p.price * it.quantity)}</div>
                 </div>
-
-                {/* Price */}
-                <div
-                  style={{
-                    fontFamily: 'var(--font-space-mono, monospace)',
-                    fontSize: '16px',
-                    fontWeight: '700',
-                    color: '#FF7300',
-                  }}
-                >
-                  {formatPrice((item.product?.price ?? 0) * item.quantity)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-
-          {/* Workflow note */}
-          <div
-            style={{
-              marginTop: '32px',
-              padding: '16px 20px',
-              backgroundColor: 'rgba(255, 115, 0, 0.05)',
-              borderLeft: '2px solid rgba(255, 115, 0, 0.4)',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '12px',
-            }}
-          >
-            <div style={{ color: '#FF7300', marginTop: '1px' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  color: '#FF7300',
-                  marginBottom: '4px',
-                }}
-              >
-                Inngest Workflow
-              </div>
-              <p
-                style={{
-                  fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                  fontSize: '13px',
-                  color: 'rgba(239, 233, 214, 0.55)',
-                  margin: 0,
-                }}
-              >
-                After payment, a 5-step durable workflow handles fulfillment. Track every step in real time on your order status page.
-              </p>
+          <div style={{ marginTop: 20 }}>
+            <Row label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
+            <Row label="Tax (8.75%)" value={`$${tax.toFixed(2)}`} />
+            <Row label="Shipping" value={shipping === 0 ? 'FREE' : `$${shipping.toFixed(2)}`} />
+            <div className="hr-soft" style={{ margin: '10px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span className="display" style={{ fontSize: 18, fontWeight: 500 }}>Total</span>
+              <span className="display tabnum" style={{ fontSize: 24, fontWeight: 500 }}>${total.toFixed(2)} USD</span>
             </div>
           </div>
         </div>
 
-        {/* ─── Right: Payment Summary ─── */}
-        <div
-          style={{
-            position: 'sticky',
-            top: '80px',
-            border: '1px solid rgba(239, 233, 214, 0.12)',
-            padding: '28px',
-          }}
-        >
-          <h2
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '11px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              color: 'rgba(239, 233, 214, 0.5)',
-              margin: '0 0 24px',
-            }}
-          >
-            Order Summary
+        <div style={{ padding: '48px 40px', background: 'var(--bone)', display: 'flex', flexDirection: 'column' }}>
+          <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>5.2 PAYMENT</div>
+          <h2 className="display" style={{ fontSize: 56, fontWeight: 400, lineHeight: 0.92, textTransform: 'uppercase', margin: '8px 0 24px' }}>
+            Stripe.<br />Hosted.
           </h2>
+          <p style={{ fontSize: 13, lineHeight: 1.55, maxWidth: 380, color: 'var(--ink)' }}>
+            We don&apos;t touch your card. Stripe handles checkout. When payment succeeds, a webhook fires <span className="mono">store/order.placed</span> and a durable Inngest workflow takes over.
+          </p>
 
-          {/* Line totals */}
-          {[
-            { label: 'Subtotal', value: formatPrice(subtotal) },
-            { label: 'Shipping', value: shipping === 0 ? 'FREE' : formatPrice(shipping) },
-          ].map(({ label, value }) => (
-            <div
-              key={label}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginBottom: '12px',
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '11px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: 'rgba(239, 233, 214, 0.5)',
-                }}
-              >
-                {label}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '13px',
-                  color: value === 'FREE' ? '#59A569' : '#EFE9D6',
-                }}
-              >
-                {value}
-              </span>
+          <div style={{ marginTop: 32, padding: 20, background: 'var(--paper)', border: '1px solid var(--ink)' }}>
+            <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
+              CHECKOUT SESSION FLOW
             </div>
-          ))}
-
-          {/* Divider */}
-          <div style={{ borderTop: '1px solid rgba(239, 233, 214, 0.12)', margin: '16px 0' }} />
-
-          {/* Total */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '28px' }}>
-            <span
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                color: '#EFE9D6',
-              }}
-            >
-              Total
-            </span>
-            <span
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '22px',
-                fontWeight: '700',
-                color: '#FF7300',
-              }}
-            >
-              {formatPrice(total)}
-            </span>
+            <FlowStep label="1 / POST /api/checkout" status={stage === 'review' ? 'pending' : 'complete'} />
+            <FlowStep label="2 / stripe.checkout.sessions.create" status={stage === 'review' ? 'pending' : stage === 'creating' ? 'running' : 'complete'} />
+            <FlowStep label="3 / Redirect to checkout.stripe.com" status={stage === 'redirecting' ? 'running' : stage === 'review' || stage === 'creating' ? 'pending' : 'complete'} />
           </div>
 
-          {/* Pay button */}
-          <button
-            onClick={handlePay}
-            style={{
-              width: '100%',
-              backgroundColor: '#FF7300',
-              color: '#1A161C',
-              border: 'none',
-              padding: '16px',
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '12px',
-              fontWeight: '700',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              cursor: 'pointer',
-              marginBottom: '12px',
-              transition: 'background-color 0.15s ease',
-            }}
-          >
-            Pay with Stripe →
-          </button>
-
-          <p
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '9px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: 'rgba(239, 233, 214, 0.25)',
-              textAlign: 'center',
-              margin: 0,
-            }}
-          >
-            Secured by Stripe · SSL Encrypted
-          </p>
+          <div style={{ marginTop: 'auto', paddingTop: 32 }}>
+            {stage === 'review' && (
+              <button className="btn btn-citrus square" style={{ width: '100%' }} onClick={() => setStage('creating')}>
+                CREATE STRIPE SESSION → ${total.toFixed(2)}
+              </button>
+            )}
+            {stage === 'creating' && (
+              <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--ink)', color: 'var(--paper)', padding: 16, textAlign: 'center', border: '1px solid var(--ink)' }}>
+                <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>CREATING SESSION…</div>
+                <div className="load-bar" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 2 }} />
+              </div>
+            )}
+            {stage === 'redirecting' && (
+              <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--citrus)', color: 'var(--nebula)', padding: 16, textAlign: 'center', border: '1px solid var(--citrus)' }}>
+                <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>REDIRECTING TO STRIPE…</div>
+              </div>
+            )}
+            <div className="mono" style={{ fontSize: 10, textAlign: 'center', marginTop: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              POWERED BY STRIPE · TEST MODE
+            </div>
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+      <span className="mono" style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>{label}</span>
+      <span className="mono tabnum" style={{ fontSize: 12.5 }}>{value}</span>
+    </div>
+  );
+}
+
+function FlowStep({ label, status }: { label: string; status: 'complete' | 'running' | 'pending' }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '16px 1fr', gap: 12, alignItems: 'center', padding: '8px 0' }}>
+      <StepDot status={status} />
+      <div className="mono" style={{ fontSize: 11.5, color: status === 'pending' ? 'var(--muted)' : 'var(--ink)' }}>{label}</div>
     </div>
   );
 }

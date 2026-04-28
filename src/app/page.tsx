@@ -1,413 +1,198 @@
+'use client';
+
+import * as React from 'react';
 import Link from 'next/link';
-import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import { PRODUCTS, formatPrice, type Product } from '@/lib/catalog';
+import { Mark } from '@/components/atoms/brand-marks';
+import { SectionHead } from '@/components/atoms/SectionHead';
+import { WorkflowTracker } from '@/components/atoms/WorkflowTracker';
+import { ProductCover } from '@/components/atoms/ProductCover';
 
 export default function CatalogPage() {
-  const all = PRODUCTS;
+  return (
+    <div>
+      <Hero />
+      <BrandBar />
+      <CatalogGrid />
+      <ManifestoStrip />
+    </div>
+  );
+}
+
+function Hero() {
+  const [stepIdx, setStepIdx] = React.useState(1);
+  React.useEffect(() => {
+    const id = setInterval(() => setStepIdx((i) => (i + 1) % 4), 2400);
+    return () => clearInterval(id);
+  }, []);
+
+  const trackerSteps = [
+    { name: 'capture-payment', detail: 'stripe.payment_intent · usd 28.00', duration: '0.32s' },
+    { name: 'reserve-inventory', detail: 'sku INN-TEE-01 · qty 1', duration: '0.18s' },
+    { name: 'send-confirmation', detail: 'to: alex@example.com', duration: '0.41s' },
+  ];
 
   return (
-    <div style={{ backgroundColor: '#1A161C', minHeight: '100vh' }}>
-
-      {/* ─── Hero ─────────────────────────────────────────────── */}
-      <section
-        style={{
-          borderBottom: '1px solid rgba(239, 233, 214, 0.12)',
-          padding: '80px 24px 72px',
-          maxWidth: '1400px',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '48px',
-          alignItems: 'end',
-        }}
-      >
-        <div>
-          {/* Eyebrow */}
-          <div
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '11px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              color: '#FF7300',
-              marginBottom: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-            }}
-          >
-            <span style={{ display: 'inline-block', width: '24px', height: '1px', backgroundColor: '#FF7300' }} />
-            Official Inngest Merchandise
+    <section style={{ background: 'var(--citrus)', color: 'var(--nebula)', borderBottom: '1px solid var(--ink)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr', padding: '32px 32px 0 32px', minHeight: 520, gap: 32 }}>
+        <div style={{ paddingBottom: 40 }}>
+          <div className="mono" style={{ fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 22 }}>
+            01 / SWAG · APR 2026 · BUILT DURABLY
           </div>
-
-          {/* Headline */}
-          <h1
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontWeight: '700',
-              fontSize: 'clamp(56px, 8vw, 96px)',
-              textTransform: 'uppercase',
-              letterSpacing: '-0.03em',
-              lineHeight: '0.92',
-              color: '#EFE9D6',
-              margin: '0 0 32px',
-            }}
-          >
-            Durably<br />
-            <span style={{ color: '#FF7300' }}>Yours.</span>
+          <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0, textWrap: 'balance' as any }}>
+            Wear<br />the<br />workflow.
           </h1>
-
-          <p
-            style={{
-              fontFamily: 'var(--font-space-grotesk, sans-serif)',
-              fontSize: '18px',
-              lineHeight: '1.6',
-              color: 'rgba(239, 233, 214, 0.65)',
-              maxWidth: '420px',
-              margin: '0 0 40px',
-            }}
-          >
-            Swag for engineers who know that every dropped step is a moral failing.
-            Ships via Inngest durable workflows.
-          </p>
-
-          {/* Stats row */}
-          <div style={{ display: 'flex', gap: '40px' }}>
-            {[
-              { label: 'Products', value: `${all.length}` },
-              { label: 'Workflow Steps', value: '5' },
-              { label: 'Retry Failures', value: '0' },
-            ].map(({ label, value }) => (
-              <div key={label}>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-space-mono, monospace)',
-                    fontSize: '28px',
-                    fontWeight: '700',
-                    color: '#EFE9D6',
-                    lineHeight: 1,
-                    marginBottom: '4px',
-                  }}
-                >
-                  {value}
-                </div>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-space-mono, monospace)',
-                    fontSize: '10px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    color: 'rgba(239, 233, 214, 0.4)',
-                  }}
-                >
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Hero visual — workflow diagram decoration */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            alignSelf: 'center',
-          }}
-        >
-          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
-          {[
-            { label: 'step.run("capture-payment")', state: 'done' },
-            { label: 'step.run("reserve-inventory")', state: 'active' },
-            { label: 'step.run("send-confirmation")', state: 'pending' },
-          ].map((step, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '10px 16px',
-                backgroundColor: step.state === 'active' ? 'rgba(255, 115, 0, 0.08)' : 'rgba(54, 44, 64, 0.3)',
-                borderLeft: `2px solid ${step.state === 'done' ? '#59A569' : step.state === 'active' ? '#FF7300' : 'rgba(239, 233, 214, 0.1)'}`,
-              }}
-            >
-              <div
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: step.state === 'done' ? '#59A569' : step.state === 'active' ? '#FF7300' : 'rgba(239, 233, 214, 0.2)',
-                  flexShrink: 0,
-                  animation: step.state === 'active' ? 'pulse 1.5s ease-in-out infinite' : 'none',
-                }}
-              />
-              <span
-                style={{
-                  fontFamily: 'var(--font-space-mono, monospace)',
-                  fontSize: '12px',
-                  color: step.state === 'done' ? '#59A569' : step.state === 'active' ? '#FF7300' : 'rgba(239, 233, 214, 0.3)',
-                }}
-              >
-                {step.label}
-              </span>
-              {step.state === 'done' && (
-                <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: '10px', color: '#59A569' }}>✓</span>
-              )}
-              {step.state === 'active' && (
-                <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: '10px', color: '#FF7300' }}>running</span>
-              )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 32, maxWidth: 720 }}>
+            <p style={{ fontSize: 14, lineHeight: 1.55, margin: 0, maxWidth: 380 }}>
+              Four objects. One brand. Every one of them shipped to you by a durable Inngest workflow you can watch run in real-time.
+            </p>
+            <div className="mono" style={{ fontSize: 11, lineHeight: 1.7, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <div>+ FREE shipping over $40</div>
+              <div>+ Ships in 3—5 days</div>
+              <div>+ Returns within 30</div>
+              <div>+ LA-printed, small batch</div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ─── Product Grid ─────────────────────────────────────── */}
-      <section
-        style={{
-          maxWidth: '1400px',
-          margin: '0 auto',
-          padding: '64px 24px',
-        }}
-      >
-        {/* Section header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            marginBottom: '32px',
-            paddingBottom: '16px',
-            borderBottom: '1px solid rgba(239, 233, 214, 0.12)',
-          }}
-        >
-          <div>
-            <span
-              style={{
-                fontFamily: 'var(--font-space-mono, monospace)',
-                fontSize: '10px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em',
-                color: '#FF7300',
-                display: 'block',
-                marginBottom: '6px',
-              }}
-            >
-              01 — All Products
-            </span>
-            <h2
-              style={{
-                fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                fontWeight: '700',
-                fontSize: '28px',
-                color: '#EFE9D6',
-                margin: 0,
-                textTransform: 'uppercase',
-              }}
-            >
-              The Full Catalog
-            </h2>
           </div>
-          <span
-            style={{
-              fontFamily: 'var(--font-space-mono, monospace)',
-              fontSize: '11px',
-              color: 'rgba(239, 233, 214, 0.4)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            {all.length} items
-          </span>
-        </div>
-
-        {/* Product grid — 1px gap creates grid-line effect on dark bg */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: '1px',
-            backgroundColor: 'rgba(239, 233, 214, 0.08)',
-          }}
-        >
-          {all.map((product) => (
-            <Link
-              key={product.id}
-              href={`/products/${product.slug}`}
-              style={{ textDecoration: 'none' }}
-            >
-              <div
-                className="product-card-item"
-                style={{
-                  backgroundColor: '#1A161C',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                {/* Product image placeholder */}
-                <div
-                  style={{
-                    width: '100%',
-                    aspectRatio: '4/3',
-                    background: product.imagePlaceholder,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <span style={{ fontSize: '64px', opacity: 0.25 }}>
-                    {product.category === 'apparel'
-                      ? product.id.includes('hoodie') ? '🧥' : '👕'
-                      : product.id.includes('sticker') ? '🏷️' : '📌'}
-                  </span>
-
-                  {/* Tags */}
-                  <div style={{ position: 'absolute', top: '12px', left: '12px', display: 'flex', gap: '6px' }}>
-                    {product.tags.slice(0, 1).map((tag) => (
-                      <span
-                        key={tag}
-                        style={{
-                          backgroundColor: tag === 'featured' ? '#FF7300' : tag === 'new' ? '#006250' : '#362C40',
-                          color: '#EFE9D6',
-                          fontFamily: 'var(--font-space-mono, monospace)',
-                          fontSize: '9px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.1em',
-                          padding: '3px 8px',
-                        }}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Orange bottom edge on featured */}
-                  {product.featured && (
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '2px', backgroundColor: '#FF7300' }} />
-                  )}
-                </div>
-
-                {/* Product info */}
-                <div
-                  style={{
-                    padding: '20px 24px 24px',
-                    borderTop: '1px solid rgba(239, 233, 214, 0.08)',
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontFamily: 'var(--font-space-mono, monospace)',
-                      fontSize: '10px',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                      color: 'rgba(239, 233, 214, 0.4)',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    {product.category}
-                  </div>
-                  <h3
-                    style={{
-                      fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                      fontWeight: '700',
-                      fontSize: '20px',
-                      color: '#EFE9D6',
-                      margin: '0 0 4px',
-                      textTransform: 'uppercase',
-                      letterSpacing: '-0.01em',
-                    }}
-                  >
-                    {product.name}
-                  </h3>
-                  <p
-                    style={{
-                      fontFamily: 'var(--font-space-grotesk, sans-serif)',
-                      fontSize: '13px',
-                      color: 'rgba(239, 233, 214, 0.5)',
-                      margin: '0 0 16px',
-                      lineHeight: '1.4',
-                      flex: 1,
-                    }}
-                  >
-                    {product.tagline}
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span
-                      style={{
-                        fontFamily: 'var(--font-space-mono, monospace)',
-                        fontSize: '18px',
-                        fontWeight: '700',
-                        color: '#FF7300',
-                      }}
-                    >
-                      {formatPrice(product.price)}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: 'var(--font-space-mono, monospace)',
-                        fontSize: '11px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.08em',
-                        color: 'rgba(239, 233, 214, 0.4)',
-                      }}
-                    >
-                      View →
-                    </span>
-                  </div>
-                </div>
-              </div>
+          <div style={{ display: 'flex', gap: 0, marginTop: 36 }}>
+            <button className="btn btn-primary square" onClick={() => document.getElementById('catalog-grid')?.scrollIntoView({ behavior: 'smooth' })}>
+              Shop the catalog →
+            </button>
+            <Link className="btn square" style={{ borderLeft: 0, background: 'transparent', color: 'var(--nebula)' }} href="/orders/ord_demo01">
+              See an order ship live ↗
             </Link>
-          ))}
+          </div>
         </div>
-      </section>
+        <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', paddingBottom: 32 }}>
+          <WorkflowTracker steps={trackerSteps} activeIdx={stepIdx > 2 ? 3 : stepIdx} label="fulfill-order.ts" />
+        </div>
+      </div>
 
-      {/* ─── Footer ─────────────────────────────────────────────── */}
-      <footer
-        style={{
-          borderTop: '1px solid rgba(239, 233, 214, 0.12)',
-          padding: '32px 24px',
-          maxWidth: '1400px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <span
-          style={{
-            fontFamily: 'var(--font-space-mono, monospace)',
-            fontSize: '11px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'rgba(239, 233, 214, 0.3)',
-          }}
-        >
-          Inngest Swag Store — Powered by Inngest Durable Workflows
-        </span>
-        <Link
-          href="https://inngest.com"
-          target="_blank"
-          style={{
-            fontFamily: 'var(--font-space-mono, monospace)',
-            fontSize: '11px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: '#FF7300',
-            textDecoration: 'none',
-          }}
-        >
-          inngest.com →
-        </Link>
-      </footer>
+      <div style={{ borderTop: '1px solid var(--ink)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 1fr 0.4fr', padding: '16px 32px' }}>
+          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            01.1<br />01.2<br />01.3<br />01.4
+          </div>
+          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', lineHeight: 1.55 }}>
+            DURABLY YOURS — TEE<br />
+            INNGEST HOODIE<br />
+            STEP FUNCTION — STICKER PACK<br />
+            INNGEST HAT
+          </div>
+          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'right', alignSelf: 'end' }}>
+            <Mark width={28} color="#1A161C" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BrandBar() {
+  const items: Array<[string, string, string]> = [
+    ['01', 'DURABLE BY DEFAULT', 'Every order is a workflow'],
+    ['02', 'REALTIME STATUS', 'Watch each step complete'],
+    ['03', 'EDITORIAL PRECISION', 'Brand-aligned, zero radius'],
+    ['04', 'STRIPE-NATIVE', 'Hosted, secure, boring'],
+  ];
+  return (
+    <div style={{ background: 'var(--nebula)', color: 'var(--paper)', borderBottom: '1px solid var(--ink)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', padding: '20px 32px', gap: 32 }}>
+        {items.map(([n, t, sub]) => (
+          <div key={n} className="mono" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, alignItems: 'start' }}>
+            <span style={{ fontSize: 11, color: 'var(--citrus)' }}>{n}</span>
+            <div>
+              <div style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{t}</div>
+              <div style={{ fontSize: 11, color: 'rgba(245, 240, 232, 0.6)' }}>{sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function CatalogGrid() {
+  return (
+    <section id="catalog-grid">
+      <SectionHead
+        num="2.0"
+        title="THE CATALOG"
+        blurb="Four SKUs. No quarter releases, no drops, no scarcity bait. Restocked when stock dips below twenty units of any size — automated by, naturally, an Inngest workflow."
+        items={[
+          { idx: '2.1', label: 'DURABLY YOURS TEE' },
+          { idx: '2.2', label: 'INNGEST HOODIE' },
+          { idx: '2.3', label: 'STEP FUNCTION STICKERS' },
+          { idx: '2.4', label: 'INNGEST HAT' },
+        ]}
+      />
+      <div className="editorial-grid">
+        {PRODUCTS.map((p, i) => (
+          <ProductCard key={p.id} product={p} index={i} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProductCard({ product, index }: { product: Product; index: number }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <Link
+      href={`/products/${product.slug}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ position: 'relative', cursor: 'pointer', padding: 0, display: 'block' }}
+    >
+      <div style={{ aspectRatio: '1.05 / 1', position: 'relative', overflow: 'hidden', background: 'var(--bone)' }}>
+        <ProductCover product={product} />
+        <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          {hover && (
+            <div className="mono slide-up" style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '6px 10px', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              VIEW PRODUCT →
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ padding: '20px 24px 24px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'end' }}>
+        <div>
+          <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+            {String(index + 1).padStart(2, '0')} · {product.type}
+          </div>
+          <div className="display" style={{ fontSize: 28, fontWeight: 500, lineHeight: 1.05, marginBottom: 8 }}>
+            {product.name}
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.5, maxWidth: 440 }}>
+            {product.blurb}
+          </div>
+          <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 14, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', gap: 14 }}>
+            <span>SKU {product.sku}</span>
+            <span>·</span>
+            <span>{product.sizes && product.sizes.length === 1 ? 'ONE SIZE' : product.sizes ? product.sizes.join(' · ') : 'ONE SIZE'}</span>
+          </div>
+        </div>
+        <div className="display tabnum" style={{ fontSize: 36, fontWeight: 400, lineHeight: 1 }}>
+          {formatPrice(product.price)}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function ManifestoStrip() {
+  return (
+    <section style={{ borderTop: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', padding: '56px 32px', background: 'var(--bone)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 1fr 0.5fr', gap: 32 }}>
+        <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+          3.0<br />MANIFESTO
+        </div>
+        <div className="display" style={{ fontSize: 'clamp(28px, 3.5vw, 48px)', lineHeight: 1.05, fontWeight: 400, letterSpacing: '-0.01em', maxWidth: 920 }}>
+          Most merch is afterthought. Ours runs on the same primitives we ship to customers. The store you&apos;re shopping was built on a livestream — checkout, fulfillment, and order tracking, all flowing through a durable workflow you can watch from the order page.
+        </div>
+        <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', alignSelf: 'end' }}>
+          — STERLING CHIN<br />
+          INNGEST DEVREL, APR 2026
+        </div>
+      </div>
+    </section>
   );
 }

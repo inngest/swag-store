@@ -41,10 +41,70 @@ Three files. Each is a clear stub with a `TODO (livestream Block N)` comment so 
 **Plugin skill expected:** `inngest-steps`
 
 ### Block 3 — Realtime to /orders/[id] (target: 10 min)
-**File:** `src/components/OrderStatusClient.tsx`
-**Current state:** Static UI, all steps render in `pending`. The demo timer was removed.
-**Plugin will add:** Subscription to `order:{orderId}` Realtime channel. Incoming `{ step, status, output }` events update the steps array.
-**Plugin skill expected:** `inngest-realtime` (or `inngest-middleware` if Realtime lives there in v0.1.0)
+**Files touched:**
+- `src/inngest/client.ts` — add `realtimeMiddleware()`
+- `src/inngest/channels.ts` (new) — define `orderChannel` with `step` topic
+- `src/inngest/functions/fulfill-order.ts` — add `publish()` calls inside each `step.run`
+- `src/app/orders/[orderId]/actions.ts` (new) — server action that mints a subscription token
+- `src/components/OrderStatusClient.tsx` — replace static state with `useInngestSubscription()`
+
+**Pre-installed:** `@inngest/realtime@^0.4.6` is in `package.json`. No skill firing required for the install.
+
+**Confirmed API (from plugin's own docs via `grep_docs realtime`):**
+
+Server (channel + middleware):
+```ts
+// src/inngest/channels.ts
+import { channel, topic } from "@inngest/realtime";
+import { z } from "zod";
+
+export const orderChannel = channel((orderId: string) => `order:${orderId}`)
+  .addTopic(topic("step").schema(
+    z.object({ name: z.string(), status: z.enum(["running","complete","failed"]), output: z.any().optional() })
+  ));
+
+// src/inngest/client.ts (add middleware)
+import { realtimeMiddleware } from "@inngest/realtime";
+export const inngest = new Inngest({
+  id: "inngest-swag-store",
+  middleware: [realtimeMiddleware()],
+});
+```
+
+In `fulfill-order.ts`, each `step.run` publishes:
+```ts
+async ({ event, step, publish }) => {
+  const { orderId } = event.data;
+  await publish(orderChannel(orderId).step({ name: "capture-payment", status: "running" }));
+  const payment = await step.run("capture-payment", async () => { /* ... */ });
+  await publish(orderChannel(orderId).step({ name: "capture-payment", status: "complete", output: payment }));
+}
+```
+
+Client (server action + hook):
+```ts
+// src/app/orders/[orderId]/actions.ts
+"use server";
+import { getSubscriptionToken } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { orderChannel } from "@/inngest/channels";
+
+export async function fetchOrderSubscriptionToken(orderId: string) {
+  return getSubscriptionToken(inngest, { channel: orderChannel(orderId), topics: ["step"] });
+}
+
+// In OrderStatusClient.tsx
+"use client";
+import { useInngestSubscription } from "@inngest/realtime/hooks";
+import { fetchOrderSubscriptionToken } from "@/app/orders/[orderId]/actions";
+
+const { data } = useInngestSubscription({
+  refreshToken: () => fetchOrderSubscriptionToken(orderId),
+});
+// data is Array<Realtime.Message> — fold into steps state
+```
+
+**Plugin skill expected:** `inngest-middleware` for the `realtimeMiddleware()` registration. The rest may not match a single skill cleanly — that's fine. Worst case, the plugin uses `grep_docs` (via the `inngest-dev` MCP) to find the pattern and writes the code from the docs. We've verified that path: `grep_docs realtime` returns 30+ matches and `read_doc features/realtime/react-hooks.mdx` has the exact pattern above.
 
 **Buffer:** 5 min wrap, Discord alpha plug, Q&A.
 
@@ -93,7 +153,7 @@ Three files. Each is a clear stub with a `TODO (livestream Block N)` comment so 
 
 ## Knowns / gotchas
 
-- **`@inngest/realtime` is deprecated.** Realtime lives in core `inngest` package now. If the plugin tries to import from `@inngest/realtime`, that's a friction-log entry. Correct path is the core `inngest` SDK.
+- **`@inngest/realtime` is the canonical package** (verified via plugin docs Apr 28). Earlier note about the package being deprecated was wrong. Pre-installed at `^0.4.6`.
 - **Citrine hex `#EFE9D6`** in the codebase is technically off — the brand Citrine is `#EFE915`. The current value functions as a warm cream foreground; not worth correcting before stream.
 - **5-step → 3-step.** The reference build had 5 steps (capture-payment, reserve-inventory, submit-to-fulfillment, generate-shipping-label, send-confirmation). Baseline cuts to 3. If the plugin tries to scaffold 5, that's an audience question opportunity.
 - **`fulfillOrder` not yet registered.** The stub is in `src/inngest/functions/fulfill-order.ts` but check that `src/app/api/inngest/route.ts` includes it in the `serve()` array before stream — should already, but verify.

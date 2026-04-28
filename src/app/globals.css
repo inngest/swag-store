@@ -1,26 +1,241 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
+
+/* ─── Inngest Brand Design Tokens ─── */
+/* Primary: Citrus Glow #FF7300, Quantum #362C40, Citrine #EFE9D6 */
+/* Secondary: Nebula #1A161C, Cloud #EEECE6, Eon Moss #006250, Dune #B17A50 */
+/* Type: ABC Whyte Inktrap (H1), ABC Whyte (H2/S), ABC Whyte Mono (CTA/label), Circular XX (body) */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-circular);
+  --font-mono: var(--font-whyte-mono);
+  --font-display: var(--font-whyte-inktrap);
+  --font-heading: var(--font-whyte);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+
+  /* Inngest brand colors as Tailwind tokens */
+  --color-citrus: #FF7300;
+  --color-quantum: #362C40;
+  --color-citrine: #EFE9D6;
+  --color-nebula: #1A161C;
+  --color-cloud: #EEECE6;
+  --color-eon-moss: #006250;
+  --color-dune: #B17A50;
+  --color-solar-lux: #CBB26A;
+  --color-matcha: #59A569;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* Dark mode is default — the store lives in Quantum/Nebula space */
+  --background: #1A161C;
+  --foreground: #EFE9D6;
+  --card: #231D27;
+  --card-foreground: #EFE9D6;
+  --popover: #231D27;
+  --popover-foreground: #EFE9D6;
+  --primary: #FF7300;
+  --primary-foreground: #1A161C;
+  --secondary: #362C40;
+  --secondary-foreground: #EFE9D6;
+  --muted: #2A2230;
+  --muted-foreground: #9B8FA8;
+  --accent: #FF7300;
+  --accent-foreground: #1A161C;
+  --destructive: #FF4444;
+  --border: rgba(239, 233, 214, 0.12);
+  --input: rgba(239, 233, 214, 0.08);
+  --ring: #FF7300;
+  --radius: 0px;
+}
+
+:root {
+  /* Font variable assignments — swap ABC Whyte for Space Grotesk as dev proxy */
+  /* ABC Whyte Inktrap → Space Grotesk Bold (closest free grotesque with personality) */
+  --font-whyte-inktrap: 'Space Grotesk', sans-serif;
+  --font-whyte: 'Space Grotesk', sans-serif;
+  --font-whyte-mono: 'Space Mono', monospace;
+  --font-circular: 'Space Grotesk', sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+
+  html {
+    background: #1A161C;
+    color: #EFE9D6;
+    font-family: 'Space Grotesk', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ─── Typography scale matching brand spec ─── */
+  /* H1: ABC Whyte Inktrap, 64pt, uppercase, tracking 0 */
+  h1 {
+    font-family: var(--font-whyte-inktrap);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: -0.02em;
+    line-height: 0.95;
+  }
+
+  /* H2 / S1: ABC Whyte, 32pt, mixed case */
+  h2 {
+    font-family: var(--font-whyte);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+
+  /* H3 */
+  h3 {
+    font-family: var(--font-whyte);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  /* Body: Circular XX → Space Grotesk Regular, 18pt */
+  p {
+    font-family: var(--font-circular);
+    font-weight: 400;
+    line-height: 1.6;
+  }
+
+  /* CTA / Caption: ABC Whyte Mono → Space Mono, 16pt, uppercase */
+  .label-mono {
+    font-family: var(--font-whyte-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ─── Inngest-specific utility classes ─── */
+@layer utilities {
+  /* The signature orange rule — 1px top border in Citrus Glow */
+  .orange-rule {
+    border-top: 1px solid #FF7300;
+  }
+
+  .orange-rule-left {
+    border-left: 2px solid #FF7300;
+  }
+
+  /* Editorial grid lines — Quantum/Citrine at 12% opacity */
+  .grid-rule {
+    border-color: rgba(239, 233, 214, 0.12);
+  }
+
+  /* Citrus Glow text */
+  .text-citrus {
+    color: #FF7300;
+  }
+
+  /* Citrine cream text */
+  .text-citrine {
+    color: #EFE9D6;
+  }
+
+  /* Quantum bg */
+  .bg-quantum {
+    background-color: #362C40;
+  }
+
+  /* Nebula bg */
+  .bg-nebula {
+    background-color: #1A161C;
+  }
+
+  /* Citrus bg */
+  .bg-citrus {
+    background-color: #FF7300;
+  }
+
+  /* Citrine bg */
+  .bg-citrine {
+    background-color: #EFE9D6;
+  }
+
+  /* Step status colors */
+  .step-pending { color: rgba(239, 233, 214, 0.4); }
+  .step-running { color: #FF7300; }
+  .step-complete { color: #59A569; }
+  .step-failed { color: #FF4444; }
+
+  /* Animated pulse for running step */
+  .step-pulse {
+    animation: step-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes step-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Cart slide-in */
+  .cart-drawer-enter {
+    animation: cart-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes cart-enter {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  /* Fade up */
+  .fade-up {
+    animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Product card hover */
+  .product-card {
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.2s ease;
+  }
+  .product-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 115, 0, 0.4);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #1A161C; }
+  ::-webkit-scrollbar-thumb { background: #362C40; }
+  ::-webkit-scrollbar-thumb:hover { background: #FF7300; }
 }

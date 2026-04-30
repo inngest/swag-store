@@ -15,38 +15,247 @@
 //   4. Source view — fulfill-order.ts with active step highlighted in citrus
 
 import * as React from 'react';
+import { subscribe } from 'inngest/realtime';
 import { StepDot } from './atoms/WorkflowTracker';
+import {
+  fetchOrderSubscriptionToken,
+  fetchOrderDetailAction,
+} from '@/app/orders/[orderId]/actions';
 
 const STEPS = [
   {
     name: 'capture-payment',
     detail: 'stripe.payment_intents.retrieve',
-    output: { id: 'pi_3OxYz1', amount: 4200, currency: 'usd', status: 'pending' },
+    output: {} as Record<string, unknown>,
   },
   {
     name: 'reserve-inventory',
     detail: 'inventory.decrement(sku, qty)',
-    output: { sku: 'INN-TEE-01', reserved: 0, remaining: 0 },
+    output: {} as Record<string, unknown>,
   },
   {
     name: 'send-confirmation',
     detail: 'email.send(template: "order_confirmation")',
-    output: { messageId: '', to: '', status: 'pending' },
+    output: {} as Record<string, unknown>,
   },
 ];
 
-export function OrderStatusClient({ orderId }: { orderId: string }) {
-  // TODO (livestream Block 3): replace static state with Realtime subscription.
-  // const { data } = useInngestSubscription({ refreshToken: () => fetchOrderSubscriptionToken(orderId) });
-  // Fold `data` into stepStatus + logs + completedDurations below.
-  const stepStatus: Array<'complete' | 'running' | 'pending'> = ['pending', 'pending', 'pending'];
-  const logs: Array<{ ts: string; level: string; msg: string }> = [
-    { ts: '00:00.000', level: 'INFO', msg: 'awaiting store/order.placed event' },
-  ];
-  const completedDurations: string[] = [];
+type StepMessage = {
+  name: string;
+  status: 'running' | 'complete' | 'failed';
+  output?: Record<string, unknown>;
+  ts: number;
+};
+
+type Hydrated = {
+  items: string;
+  totalCents: number;
+  currency: string;
+  email: string;
+  name: string;
+  createdAt: string;
+};
+
+function maskEmail(email: string): string {
+  if (!email) return '';
+  const [local = '', domain = ''] = email.split('@');
+  const [domainName = '', tld = ''] = domain.split('.');
+  return `${'*'.repeat(Math.max(local.length, 4))}@${'*'.repeat(Math.max(domainName.length, 4))}${tld ? `.${tld}` : ''}`;
+}
+
+export function OrderStatusClient({
+  orderId,
+  publicView = false,
+}: {
+  orderId: string;
+  publicView?: boolean;
+}) {
+  const [messages, setMessages] = React.useState<StepMessage[]>([]);
+  const [startTs, setStartTs] = React.useState<number | null>(null);
+  const [hydrated, setHydrated] = React.useState<Hydrated | null>(null);
+
+  // Hydrate from sheet on mount: if the order is recorded, every step is done.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await fetchOrderDetailAction(orderId);
+        if (cancelled || !detail) return;
+        setHydrated({
+          items: detail.items,
+          totalCents: detail.totalCents,
+          currency: detail.currency,
+          email: detail.email,
+          name: detail.name,
+          createdAt: detail.createdAt,
+        });
+      } catch (err) {
+        console.error('[order-hydrate] failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let sub: { close?: (reason?: string) => void } | undefined;
+
+    (async () => {
+      try {
+        const token = await fetchOrderSubscriptionToken(orderId);
+        if (cancelled) return;
+
+        sub = await subscribe(
+          {
+            channel: token.channel,
+            topics: [...token.topics],
+            key: token.key,
+            apiBaseUrl: token.apiBaseUrl,
+          },
+          (message) => {
+            if (cancelled) return;
+            const data = message.data as StepMessage;
+            setMessages((prev) => [...prev, data]);
+            setStartTs((s) => s ?? data.ts);
+          },
+        );
+      } catch (err) {
+        console.error('[realtime] subscribe failed', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      sub?.close?.('unmount');
+    };
+  }, [orderId]);
+
+  // Fold messages → per-step status, durations, and a log timeline.
+  const stepStatus = STEPS.map((s) => {
+    const msgs = messages.filter((m) => m.name === s.name);
+    if (msgs.some((m) => m.status === 'complete')) return 'complete' as const;
+    if (msgs.some((m) => m.status === 'running')) return 'running' as const;
+    // If the order is in the sheet, all customer-visible steps already ran.
+    if (hydrated) return 'complete' as const;
+    return 'pending' as const;
+  });
+
+  const stepOutputs = STEPS.map((s) => {
+    const live = messages.findLast((m) => m.name === s.name && m.status === 'complete')?.output;
+    if (live) return live;
+    if (!hydrated) return undefined;
+    // Reconstruct from sheet data when realtime is unavailable (page loaded
+    // after the function already finished).
+    if (s.name === 'capture-payment') {
+      return {
+        status: 'succeeded',
+        amount: publicView ? '***' : hydrated.totalCents,
+        currency: hydrated.currency.toLowerCase(),
+      };
+    }
+    if (s.name === 'reserve-inventory') {
+      return {
+        items: hydrated.items,
+        reservedAt: hydrated.createdAt,
+      };
+    }
+    if (s.name === 'send-confirmation') {
+      return {
+        recipient: publicView ? maskEmail(hydrated.email) : hydrated.email,
+        sentAt: hydrated.createdAt,
+      };
+    }
+    return undefined;
+  });
+
+  const completedDurations = STEPS.map((s) => {
+    const running = messages.find((m) => m.name === s.name && m.status === 'running');
+    const complete = messages.find((m) => m.name === s.name && m.status === 'complete');
+    if (!running || !complete) return '';
+    return ((complete.ts - running.ts) / 1000).toFixed(2);
+  });
+
+  const logs = (() => {
+    if (messages.length > 0) {
+      return messages.map((m) => ({
+        ts: formatRelative(m.ts, startTs ?? m.ts),
+        level: m.status === 'failed' ? 'ERROR' : 'INFO',
+        msg: `step.${m.name} → ${m.status}`,
+      }));
+    }
+    if (hydrated) {
+      // Synthesize a log timeline from the recorded order. Real timestamps
+      // aren't preserved past the workflow, so we offset evenly off createdAt.
+      const base = new Date(hydrated.createdAt).getTime();
+      const stepNames = ['capture-payment', 'reserve-inventory', 'send-confirmation'] as const;
+      const entries: Array<{ ts: string; level: string; msg: string }> = [];
+      stepNames.forEach((name, i) => {
+        entries.push({
+          ts: formatRelative(base + i * 200, base),
+          level: 'INFO',
+          msg: `step.${name} → running`,
+        });
+        entries.push({
+          ts: formatRelative(base + i * 200 + 150, base),
+          level: 'INFO',
+          msg: `step.${name} → complete`,
+        });
+      });
+      entries.push({
+        ts: formatRelative(base + stepNames.length * 200 + 200, base),
+        level: 'INFO',
+        msg: 'order received · being prepped',
+      });
+      return entries;
+    }
+    return [{ ts: '00:00.000', level: 'INFO', msg: 'awaiting store/order.placed event' }];
+  })();
   const allDone = stepStatus.every((s) => s === 'complete');
   const activeIdx = stepStatus.findIndex((s) => s === 'running');
   const [open, setOpen] = React.useState(true);
+
+  const paymentOutput = stepOutputs[0] as { amount?: number; currency?: string } | undefined;
+  const inventoryOutput = stepOutputs[1] as
+    | {
+        reservations?: Array<{
+          name?: string;
+          quantity?: number;
+          size?: string;
+          color?: string;
+        }>;
+        count?: number;
+      }
+    | undefined;
+
+  const totalLabel = publicView
+    ? '$***.** ***'
+    : paymentOutput?.amount
+      ? `$${(paymentOutput.amount / 100).toFixed(2)} ${(paymentOutput.currency ?? 'usd').toUpperCase()}`
+      : hydrated?.totalCents
+        ? `$${(hydrated.totalCents / 100).toFixed(2)} ${hydrated.currency.toUpperCase()}`
+        : '—';
+
+  const itemsLabel = inventoryOutput?.reservations?.length
+    ? (() => {
+        const totalUnits = inventoryOutput.reservations!.reduce(
+          (sum, r) => sum + (r.quantity ?? 0),
+          0,
+        );
+        const names = inventoryOutput.reservations!
+          .map((r) => {
+            const variant = [r.size, r.color].filter(Boolean).join('/');
+            const variantTag = variant ? ` (${variant.toUpperCase()})` : '';
+            const qtyTag = (r.quantity ?? 1) > 1 ? ` × ${r.quantity}` : '';
+            return `${(r.name ?? 'item').toUpperCase()}${variantTag}${qtyTag}`;
+          })
+          .join(', ');
+        return `${totalUnits} ITEM${totalUnits === 1 ? '' : 'S'} · ${names}`;
+      })()
+    : hydrated?.items
+      ? hydrated.items.toUpperCase()
+      : 'AWAITING INVENTORY STEP';
 
   return (
     <div>
@@ -74,8 +283,8 @@ export function OrderStatusClient({ orderId }: { orderId: string }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8 }}>
             <OrderMetric label="ORDER ID" value={orderId} mono />
-            <OrderMetric label="ITEMS" value="2 ITEMS · DURABLY YOURS TEE, INNGEST HAT" />
-            <OrderMetric label="TOTAL" value="$42.00 USD" mono />
+            <OrderMetric label="ITEMS" value={itemsLabel} />
+            <OrderMetric label="TOTAL" value={totalLabel} mono />
             <OrderMetric label="ETA" value="3—5 BUSINESS DAYS · USPS" />
           </div>
         </div>
@@ -89,9 +298,19 @@ export function OrderStatusClient({ orderId }: { orderId: string }) {
             <span>FUNCTION ID · fulfill-order · attempt 1</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${STEPS.length}, 1fr)`, gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
-            {STEPS.map((s, i) => (
-              <StepCard key={s.name} index={i} step={s} status={stepStatus[i]} duration={completedDurations[i]} />
-            ))}
+            {STEPS.map((s, i) => {
+              const liveOutput = stepOutputs[i] as Record<string, unknown> | undefined;
+              const stepWithLiveOutput = { ...s, output: liveOutput ?? s.output };
+              return (
+                <StepCard
+                  key={s.name}
+                  index={i}
+                  step={stepWithLiveOutput}
+                  status={stepStatus[i]}
+                  duration={completedDurations[i]}
+                />
+              );
+            })}
           </div>
         </div>
       </div>
@@ -137,6 +356,15 @@ export function OrderStatusClient({ orderId }: { orderId: string }) {
       </div>
     </div>
   );
+}
+
+function formatRelative(ts: number, start: number): string {
+  const ms = Math.max(0, ts - start);
+  const totalMs = Math.floor(ms);
+  const minutes = Math.floor(totalMs / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const millis = totalMs % 1000;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
 function OrderMetric({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

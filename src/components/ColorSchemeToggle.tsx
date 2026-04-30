@@ -151,11 +151,14 @@ function applyScheme(scheme: Scheme) {
 
 export function ColorSchemeToggle() {
   const [open, setOpen] = React.useState(false);
-  const [active, setActive] = React.useState('citrus');
+  const [active, setActive] = React.useState('matcha');
 
   React.useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    const scheme = SCHEMES.find((s) => s.id === saved) ?? SCHEMES[0];
+    const scheme =
+      SCHEMES.find((s) => s.id === saved) ??
+      SCHEMES.find((s) => s.id === 'matcha') ??
+      SCHEMES[0];
     setActive(scheme.id);
     applyScheme(scheme);
   }, []);

@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inngest Swag Store
 
-## Getting Started
+Official store for Inngest merchandise. Built durably — every order flows through an Inngest function you can watch run in real time.
 
-First, run the development server:
+Live at [swag.inngest.com](https://swag.inngest.com).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## What this is
+
+A small Next.js e-commerce site that demonstrates Inngest in production. Stripe handles payments. Inngest handles the durable order workflow. Google Sheets is the fulfillment surface. Realtime publishes power a public live order tracker at `/admin`.
+
+## Architecture
+
+```
+Stripe Checkout → POST /api/webhooks/stripe → inngest.send("store/order.placed")
+                                                            ↓
+                              fulfill-order Inngest function (4 durable steps):
+                                ├─ step.run("capture-payment")
+                                ├─ step.run("reserve-inventory")
+                                ├─ step.run("send-confirmation")
+                                └─ step.run("record-to-sheet")  ← appends to Google Sheet
+
+Each step publishes to two Realtime channels:
+  - order:{orderId}  → the customer's /orders/[orderId] page
+  - admin            → the public /admin live tracker
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+PII (email, name, phone, shipping) flows through `event.data.encrypted` and is encrypted at rest in Inngest's storage via `@inngest/middleware-encryption`. Step outputs and realtime payloads are PII-free.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Local setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+You need:
 
-## Learn More
+- Node 20+
+- A Stripe test-mode account
+- Stripe CLI installed (`brew install stripe/stripe-cli/stripe`)
+- A Google Cloud project with Sheets API enabled, plus a service account
+- A Google Sheet with the canonical column schema (run `node scripts/setup-orders-sheet.mjs <spreadsheet-id>` after sharing the sheet with the service account)
 
-To learn more about Next.js, take a look at the following resources:
+### 1. Install + env
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+cp .env.local.example .env.local
+# fill in real values
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 2. Three terminals
 
-## Deploy on Vercel
+```bash
+# Terminal 1 — Next.js dev server
+npm run dev
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# Terminal 2 — Inngest dev server
+npx inngest-cli@latest dev
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# Terminal 3 — Stripe webhook forwarding
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+# copy the printed whsec_... into STRIPE_WEBHOOK_SECRET in .env.local
+```
+
+Visit [http://localhost:3000](http://localhost:3000) to browse, [http://localhost:8288](http://localhost:8288) for the Inngest dashboard, [http://localhost:3000/admin](http://localhost:3000/admin) for the live order tracker.
+
+## Project layout
+
+| Path | Purpose |
+|------|---------|
+| `src/app/api/checkout/route.ts` | Creates Stripe Checkout Sessions |
+| `src/app/api/webhooks/stripe/route.ts` | Validates Stripe signatures, fires `store/order.placed` |
+| `src/app/api/inngest/route.ts` | Inngest serve handler |
+| `src/inngest/client.ts` | Inngest client + encryption middleware |
+| `src/inngest/channels.ts` | Realtime channels (`order:{id}`, `admin`) |
+| `src/inngest/functions/fulfill-order.ts` | The durable workflow — 4 steps |
+| `src/lib/sheets.ts` | Google Sheets read/write helpers |
+| `src/lib/catalog.ts` | Static product catalog |
+| `src/components/OrderStatusClient.tsx` | Customer-facing order page |
+| `src/components/AdminClient.tsx` | Public live order tracker |
+
+## Privacy model
+
+- Order page (`/orders/[id]`) defaults to **masked** PII (email + total).
+- Customer arriving from Stripe redirect → confirmation page calls `unlockOrderViewing` server action → cookie set → full data on subsequent visits to that order.
+- Anyone else (admin INSPECT, shared link) → masked.
+
+Cookie is httpOnly + 30-day, scoped per order ID. Stripe `session_id` verified server-side before issuing.
+
+## Deploying
+
+The site deploys to Vercel. Configure these env vars in the Vercel dashboard:
+
+- `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` (from Inngest Cloud — leave `INNGEST_DEV` unset)
+- `INNGEST_ENCRYPTION_KEY` (32-byte base64; same key across environments)
+- `GOOGLE_SERVICE_ACCOUNT_JSON` (base64 of the SA key JSON)
+- `ORDERS_SHEET_ID`, `ORDERS_SHEET_NAME`
+- `NEXT_PUBLIC_APP_URL` (e.g. `https://swag.inngest.com`)
+
+Stripe webhook destination (production): `https://swag.inngest.com/api/webhooks/stripe`. Get the production `whsec_` from Stripe Dashboard → Developers → Webhooks.
+
+## License
+
+MIT — see [LICENSE](./LICENSE). Forks, copies, and adaptations welcome. If you build something cool with this pattern, we'd love to hear about it.

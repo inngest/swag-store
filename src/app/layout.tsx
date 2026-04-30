@@ -5,7 +5,7 @@ import { CartProvider } from '@/lib/cart-context';
 import { Navbar } from '@/components/Navbar';
 import { CartDrawer } from '@/components/CartDrawer';
 import { Footer } from '@/components/atoms/Footer';
-import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
+// import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
 
 export const metadata: Metadata = {
   title: 'Inngest Swag — Wear the Workflow',
@@ -31,7 +31,7 @@ export default function RootLayout({
           <main>{children}</main>
           <Footer />
           <CartDrawer />
-          <ColorSchemeToggle />
+          {/* <ColorSchemeToggle /> */}
         </CartProvider>
       </body>
     </html>

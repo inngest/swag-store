@@ -5,15 +5,14 @@ import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { useCart } from '@/lib/cart-context';
 import { PRODUCTS, formatPrice } from '@/lib/catalog';
-import { useRouter } from 'next/navigation';
 import { StepDot } from './atoms/WorkflowTracker';
 
-type Stage = 'review' | 'creating' | 'redirecting';
+type Stage = 'review' | 'creating' | 'redirecting' | 'error';
 
 export function CheckoutClient() {
   const { state } = useCart();
-  const router = useRouter();
   const [stage, setStage] = useState<Stage>('review');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const lineItems = state.items.map((item) => {
     const product = PRODUCTS.find((p) => p.id === item.productId);
@@ -27,15 +26,32 @@ export function CheckoutClient() {
   const total = +(subtotal + tax + shipping).toFixed(2);
 
   useEffect(() => {
-    if (stage === 'creating') {
-      const t = setTimeout(() => setStage('redirecting'), 1400);
-      return () => clearTimeout(t);
-    }
-    if (stage === 'redirecting') {
-      const t = setTimeout(() => router.push(`/orders/confirmation?ord=ord_${Date.now()}`), 1800);
-      return () => clearTimeout(t);
-    }
-  }, [stage, router]);
+    if (stage !== 'creating') return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: state.items }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
+        if (cancelled) return;
+        setStage('redirecting');
+        window.location.href = data.url;
+      } catch (err) {
+        if (cancelled) return;
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+        setStage('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, state.items]);
 
   if (lineItems.length === 0) {
     return (
@@ -125,6 +141,17 @@ export function CheckoutClient() {
             {stage === 'redirecting' && (
               <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--citrus)', color: 'var(--nebula)', padding: 16, textAlign: 'center', border: '1px solid var(--citrus)' }}>
                 <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>REDIRECTING TO STRIPE…</div>
+              </div>
+            )}
+            {stage === 'error' && (
+              <div>
+                <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: 16, border: '1px solid var(--ink)' }}>
+                  <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>CHECKOUT FAILED</div>
+                  <div className="mono" style={{ fontSize: 11, opacity: 0.75, lineHeight: 1.5 }}>{errorMessage}</div>
+                </div>
+                <button className="btn btn-citrus square" style={{ width: '100%', marginTop: 8 }} onClick={() => { setErrorMessage(null); setStage('review'); }}>
+                  TRY AGAIN
+                </button>
               </div>
             )}
             <div className="mono" style={{ fontSize: 10, textAlign: 'center', marginTop: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>

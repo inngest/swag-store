@@ -2,129 +2,230 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { subscribe } from 'inngest/realtime';
+import {
+  fetchAdminSubscriptionToken,
+  fetchPublicOrdersAction,
+} from '@/app/admin/actions';
 import { StepDot } from './atoms/WorkflowTracker';
+
+type OrderMessage = {
+  orderId: string;
+  customerEmail?: string;
+  amount?: number;
+  currency?: string;
+  items?: Array<{ name: string; quantity: number }>;
+  step: string;
+  status: 'running' | 'complete' | 'failed';
+  ts: number;
+};
 
 type Order = {
   id: string;
-  email: string;
-  total: number;
   items: string;
   step: string;
-  status: 'running' | 'complete';
-  t: string;
+  status: 'running' | 'complete' | 'failed';
+  tracking: string;
+  firstSeen: number;
+  lastUpdated: number;
 };
 
-const SEED: Order[] = [
-  { id: 'ord_a01', email: 'alex@example.com', total: 42.0, items: 'Tee × 1, Hat × 1', step: 'send-confirmation', status: 'running', t: '0s ago' },
-  { id: 'ord_a02', email: 'j.lin@hey.so', total: 86.0, items: 'Hoodie × 1, Stickers × 1', step: 'reserve-inventory', status: 'running', t: '12s ago' },
-  { id: 'ord_a03', email: 'marco@inn.dev', total: 28.0, items: 'Tee × 1', step: 'complete', status: 'complete', t: '1m ago' },
-  { id: 'ord_a04', email: 'sam@codes.io', total: 24.0, items: 'Hat × 1', step: 'complete', status: 'complete', t: '3m ago' },
-  { id: 'ord_a05', email: 'priya@labs.run', total: 70.0, items: 'Hoodie × 1, Hat × 1', step: 'complete', status: 'complete', t: '5m ago' },
-  { id: 'ord_a06', email: 'wren@deno.fm', total: 12.0, items: 'Stickers × 1', step: 'complete', status: 'complete', t: '8m ago' },
-  { id: 'ord_a07', email: 'kira@build.so', total: 56.0, items: 'Tee × 2', step: 'complete', status: 'complete', t: '12m ago' },
-];
+function foldMessage(prev: Map<string, Order>, msg: OrderMessage): Map<string, Order> {
+  const next = new Map(prev);
+  const existing = next.get(msg.orderId);
+
+  const itemsLabel = msg.items?.length
+    ? msg.items
+        .map((i) => `${i.name}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`)
+        .join(', ')
+    : existing?.items ?? '';
+
+  const isTerminal = msg.step === 'record-to-sheet' && msg.status === 'complete';
+
+  next.set(msg.orderId, {
+    id: msg.orderId,
+    items: itemsLabel,
+    step: isTerminal ? 'fulfilled' : msg.step,
+    status: isTerminal ? 'complete' : msg.status,
+    tracking: existing?.tracking ?? '',
+    firstSeen: existing?.firstSeen ?? msg.ts,
+    lastUpdated: msg.ts,
+  });
+
+  return next;
+}
+
+function foldHydratedRow(
+  prev: Map<string, Order>,
+  row: { orderId: string; createdAt: string; items: string; status: string; tracking: string },
+): Map<string, Order> {
+  if (!row.orderId) return prev;
+  if (prev.has(row.orderId)) return prev;
+  const next = new Map(prev);
+  const ts = row.createdAt ? new Date(row.createdAt).getTime() : Date.now();
+  next.set(row.orderId, {
+    id: row.orderId,
+    items: row.items,
+    step: row.status === 'ready_to_ship' ? 'fulfilled' : row.status,
+    status: 'complete',
+    tracking: row.tracking,
+    firstSeen: Number.isFinite(ts) ? ts : Date.now(),
+    lastUpdated: Number.isFinite(ts) ? ts : Date.now(),
+  });
+  return next;
+}
+
+function formatRelative(ts: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - ts) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export function AdminClient() {
-  const [orders, setOrders] = React.useState<Order[]>(SEED);
+  const [orders, setOrders] = React.useState<Map<string, Order>>(new Map());
   const [pulse, setPulse] = React.useState<string | null>(null);
+  const [now, setNow] = React.useState<number>(() => Date.now());
+  const [subStatus, setSubStatus] = React.useState<string>('connecting');
 
+  // Live ticking clock for "Xs ago" labels
   React.useEffect(() => {
-    const id = setInterval(() => {
-      setOrders((prev) =>
-        prev.map((o, i) => {
-          if (i === 0 && o.status === 'running') {
-            if (o.step === 'capture-payment') return { ...o, step: 'reserve-inventory' };
-            if (o.step === 'reserve-inventory') return { ...o, step: 'send-confirmation' };
-            if (o.step === 'send-confirmation') {
-              setPulse(o.id);
-              setTimeout(() => setPulse(null), 700);
-              return { ...o, step: 'complete', status: 'complete', t: 'just now' };
-            }
-          }
-          return o;
-        }),
-      );
-    }, 2400);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
+  // Hydrate from Sheets on mount
   React.useEffect(() => {
-    const t = setInterval(() => {
-      const fakes = ['dev@inn.gst', 'kira@vector.studio', 'rohan@ship.now', 'luca@workflow.cc'];
-      const itemsList = ['Tee × 1', 'Hoodie × 1', 'Hat × 1, Stickers × 1', 'Tee × 1, Hat × 1'];
-      const totals = [28.0, 58.0, 36.0, 52.0];
-      const i = Math.floor(Math.random() * fakes.length);
-      const j = Math.floor(Math.random() * itemsList.length);
-      const newOrder: Order = {
-        id: `ord_${Math.random().toString(36).slice(2, 7)}`,
-        email: fakes[i],
-        total: totals[j],
-        items: itemsList[j],
-        step: 'capture-payment',
-        status: 'running',
-        t: 'just now',
-      };
-      setOrders((prev) => [newOrder, ...prev].slice(0, 9));
-      setPulse(newOrder.id);
-      setTimeout(() => setPulse(null), 700);
-    }, 7800);
-    return () => clearInterval(t);
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fetchPublicOrdersAction();
+        if (cancelled) return;
+        setOrders((prev) => {
+          let next = prev;
+          for (const row of rows) next = foldHydratedRow(next, row);
+          return next;
+        });
+      } catch (err) {
+        console.error('[admin-hydrate] failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const liveCount = orders.filter((o) => o.status === 'running').length;
-  const revenue = orders.reduce((s, o) => s + o.total, 0).toFixed(0);
+  // Realtime subscription for live step updates
+  React.useEffect(() => {
+    let cancelled = false;
+    let sub: { close?: (reason?: string) => void } | undefined;
+    let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+
+    (async () => {
+      try {
+        const token = await fetchAdminSubscriptionToken();
+        if (cancelled) return;
+
+        sub = await subscribe(
+          {
+            channel: token.channel,
+            topics: [...token.topics],
+            key: token.key,
+            apiBaseUrl: token.apiBaseUrl,
+          },
+          (message) => {
+            if (cancelled) return;
+            const data = message.data as OrderMessage;
+            setOrders((prev) => foldMessage(prev, data));
+            setPulse(data.orderId);
+            if (pulseTimer) clearTimeout(pulseTimer);
+            pulseTimer = setTimeout(() => setPulse(null), 700);
+          },
+        );
+        if (!cancelled) setSubStatus('subscribed');
+      } catch (err) {
+        console.error('[admin-realtime] subscribe failed', err);
+        if (!cancelled) setSubStatus(`error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      sub?.close?.('unmount');
+      if (pulseTimer) clearTimeout(pulseTimer);
+    };
+  }, []);
+
+  const orderList = React.useMemo(
+    () => Array.from(orders.values()).sort((a, b) => b.lastUpdated - a.lastUpdated),
+    [orders],
+  );
+
+  const liveCount = orderList.filter((o) => o.status === 'running').length;
+  const fulfilledCount = orderList.filter((o) => o.status === 'complete').length;
 
   return (
     <div>
       <div style={{ borderBottom: '1px solid var(--ink)', padding: '32px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 32, alignItems: 'end' }}>
         <div>
-          <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
-            ADMIN · 07 / ORDERS · CHANNEL · admin:orders
+          <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span className="live-dot" />
+            PUBLIC LIVE TRACKER · CHANNEL · admin · {subStatus}
           </div>
           <h1 className="display" style={{ fontSize: 'clamp(56px, 8vw, 120px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
             Orders, live.
           </h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.55, maxWidth: 540, marginTop: 16, color: 'var(--muted)' }}>
+            Every order placed on this store flows through a durable Inngest workflow. Watch them progress in real time, click through to inspect any function run.
+          </p>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
-          <Stat label="LIVE" value={liveCount} accent />
-          <Stat label="TODAY" value={orders.length} />
-          <Stat label="REVENUE" value={`$${revenue}`} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
+          <Stat label="IN FLIGHT" value={liveCount} accent />
+          <Stat label="FULFILLED" value={fulfilledCount} />
         </div>
       </div>
 
       <div style={{ padding: '0 32px 32px' }}>
-        <div className="mono" style={{ display: 'grid', gridTemplateColumns: '0.7fr 1.2fr 0.8fr 1.4fr 1.2fr 0.7fr 0.5fr', padding: '16px 0', borderBottom: '1px solid var(--ink)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+        <div className="mono" style={{ display: 'grid', gridTemplateColumns: '0.8fr 2fr 1.4fr 0.7fr 0.5fr', padding: '16px 0', borderBottom: '1px solid var(--ink)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
           <span>ORDER</span>
-          <span>EMAIL</span>
-          <span>TOTAL</span>
           <span>ITEMS</span>
           <span>CURRENT STEP</span>
           <span>UPDATED</span>
           <span />
         </div>
-        {orders.map((o) => (
+
+        {orderList.length === 0 && (
+          <div className="mono" style={{ padding: '32px 0', color: 'var(--muted)', fontSize: 12 }}>
+            No orders yet. Place one — it will appear here in real time.
+          </div>
+        )}
+
+        {orderList.map((o) => (
           <div
             key={o.id}
             className={pulse === o.id ? 'step-in' : ''}
             style={{
               display: 'grid',
-              gridTemplateColumns: '0.7fr 1.2fr 0.8fr 1.4fr 1.2fr 0.7fr 0.5fr',
+              gridTemplateColumns: '0.8fr 2fr 1.4fr 0.7fr 0.5fr',
               padding: '16px 0',
               borderBottom: '1px solid var(--rule-soft)',
               alignItems: 'center',
-              background: pulse === o.id ? 'rgba(255, 115, 0, 0.06)' : 'transparent',
+              background: pulse === o.id ? 'rgba(89, 165, 105, 0.08)' : 'transparent',
               transition: 'background 480ms',
             }}
           >
             <span className="mono tabnum" style={{ fontSize: 12 }}>{o.id}</span>
-            <span style={{ fontSize: 13 }}>{o.email}</span>
-            <span className="mono tabnum" style={{ fontSize: 12.5 }}>${o.total.toFixed(2)}</span>
-            <span style={{ fontSize: 12.5, color: 'var(--ink)' }}>{o.items}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--ink)' }}>{o.items || '—'}</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <StepDot status={o.status === 'complete' ? 'complete' : 'running'} />
               <span className="mono" style={{ fontSize: 11.5 }}>{o.step}</span>
             </span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{o.t}</span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{formatRelative(o.lastUpdated, now)}</span>
             <span style={{ textAlign: 'right' }}>
               <Link
                 href={`/orders/${o.id}`}

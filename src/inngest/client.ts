@@ -1,10 +1,11 @@
 import { Inngest } from 'inngest';
+import { encryptionMiddleware } from '@inngest/middleware-encryption';
 
-// ─── Inngest client ────────────────────────────────────────────────────────
-// This is the single Inngest client for the store.
-// All events and functions reference this client.
+const middleware = process.env.INNGEST_ENCRYPTION_KEY
+  ? [encryptionMiddleware({ key: process.env.INNGEST_ENCRYPTION_KEY })]
+  : [];
 
 export const inngest = new Inngest({
   id: 'inngest-swag-store',
-  // In production, set INNGEST_EVENT_KEY env var
+  middleware,
 });

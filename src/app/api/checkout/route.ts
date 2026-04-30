@@ -1,30 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
 import { PRODUCTS } from '@/lib/catalog';
 
-// ─── Checkout API Route ───────────────────────────────────────────────────
-// Creates a Stripe Checkout Session and returns the redirect URL.
-// The frontend POSTs the cart, this returns { url } to redirect to.
-//
-// LIVESTREAM: Show this route being built. The key insight:
-//   - We don't fire the Inngest event here
-//   - We wait for Stripe webhook confirmation (idempotent, reliable)
-//   - Then fire "store/order.placed" from the webhook handler
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+type CartItem = {
+  productId: string;
+  variantId: string;
+  quantity: number;
+  size?: string;
+  color?: string;
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const { items } = await req.json();
+    const { items } = (await req.json()) as { items: CartItem[] };
 
-    // Build line items for Stripe
-    const lineItems = items.map((item: { productId: string; variantId: string; quantity: number; size?: string }) => {
+    if (!items?.length) {
+      return NextResponse.json({ error: 'cart is empty' }, { status: 400 });
+    }
+
+    const lineItems = items.map((item) => {
       const product = PRODUCTS.find((p) => p.id === item.productId);
       if (!product) throw new Error(`Product not found: ${item.productId}`);
+
+      const descriptionParts = [item.size && `Size: ${item.size}`, item.color && `Color: ${item.color}`]
+        .filter(Boolean)
+        .join(' · ');
 
       return {
         price_data: {
           currency: 'usd',
           product_data: {
             name: product.name,
-            description: item.size ? `Size: ${item.size}` : undefined,
+            ...(descriptionParts ? { description: descriptionParts } : {}),
+            metadata: {
+              sku: product.sku,
+              variantId: item.variantId,
+              size: item.size ?? '',
+              color: item.color ?? '',
+            },
           },
           unit_amount: product.price,
         },
@@ -32,25 +47,30 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // In production, use the Stripe SDK:
-    // const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    // const session = await stripe.checkout.sessions.create({
-    //   mode: 'payment',
-    //   line_items: lineItems,
-    //   success_url: `${req.nextUrl.origin}/orders/confirmation?session_id={CHECKOUT_SESSION_ID}`,
-    //   cancel_url: `${req.nextUrl.origin}/checkout`,
-    //   metadata: { orderId: generateOrderId() },
-    // });
-    // return NextResponse.json({ url: session.url });
+    const orderId = `ord_${Math.random().toString(36).slice(2, 10)}`;
+    const origin = req.nextUrl.origin;
 
-    // For demo/livestream, return a mock URL:
-    const mockOrderId = `ORD-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-    return NextResponse.json({
-      url: `/orders/${mockOrderId}`,
-      orderId: mockOrderId,
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: lineItems,
+      success_url: `${origin}/orders/confirmation?ord=${orderId}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/checkout`,
+      metadata: { orderId },
+      shipping_address_collection: {
+        allowed_countries: ['US', 'CA'],
+      },
+      billing_address_collection: 'auto',
+      phone_number_collection: { enabled: true },
     });
+
+    if (!session.url) {
+      throw new Error('Stripe did not return a checkout URL');
+    }
+
+    return NextResponse.json({ url: session.url, orderId });
   } catch (err) {
-    console.error('Checkout error:', err);
-    return NextResponse.json({ error: 'Checkout failed' }, { status: 500 });
+    const message = err instanceof Error ? err.message : 'Checkout failed';
+    console.error('[checkout] error:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

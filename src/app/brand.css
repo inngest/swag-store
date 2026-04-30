@@ -4,8 +4,8 @@
    un-layered custom CSS, so these are intentionally separate. */
 
 :root {
-  --citrus: #FF7300;
-  --citrus-deep: #E0590A;
+  --citrus: #59A569;
+  --citrus-deep: #3F8D52;
   --nebula: #1A161C;
   --ink: #1A161C;
   --paper: #FFFFFF;
@@ -98,9 +98,10 @@ input, select { font-family: inherit; }
   color: #E8E3DD;
   padding: 24px;
   overflow-x: auto;
+  white-space: pre;
 }
 .code-line { display: block; }
-.code-line.active { background: rgba(255, 115, 0, 0.16); display: block; margin: 0 -24px; padding: 0 24px; border-left: 2px solid var(--citrus); padding-left: 22px; }
+.code-line.active { background: rgba(89, 165, 105, 0.16); display: block; margin: 0 -24px; padding: 0 24px; border-left: 2px solid var(--citrus); padding-left: 22px; }
 .tok-kw { color: #FF9A4D; }
 .tok-fn { color: #FFD9B8; }
 .tok-str { color: #B8E1D2; }
@@ -127,8 +128,8 @@ input, select { font-family: inherit; }
 .meta-row .plus { color: var(--ink); }
 
 .gradient-placeholder { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.04) 0 1px, transparent 1px 14px), linear-gradient(135deg, var(--bone), #ECE6DD); }
-.gradient-placeholder-dark { background: repeating-linear-gradient(135deg, rgba(255,115,0,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #2A2228, #1A161C); }
-.gradient-placeholder-citrus { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #FF7300, #E0590A); }
+.gradient-placeholder-dark { background: repeating-linear-gradient(135deg, rgba(89,165,105,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #2A2228, #1A161C); }
+.gradient-placeholder-citrus { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #59A569, #3F8D52); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

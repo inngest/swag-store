@@ -4,10 +4,34 @@ import * as React from 'react';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { unlockOrderViewing } from '@/app/orders/[orderId]/actions';
 
 function ConfirmationContent() {
   const params = useSearchParams();
   const orderId = params.get('ord') ?? 'ord_demo01';
+  const sessionId = params.get('session_id');
+  const [email, setEmail] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await unlockOrderViewing(orderId, sessionId);
+        if (cancelled) return;
+        if ('email' in result) {
+          setEmail(result.email);
+        } else {
+          console.error('[confirmation-unlock] failed', result.error);
+        }
+      } catch (err) {
+        console.error('[confirmation-unlock] threw', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, sessionId]);
 
   return (
     <div>
@@ -31,9 +55,11 @@ function ConfirmationContent() {
           <div className="display tabnum" style={{ fontSize: 36, fontWeight: 500, marginTop: 6, letterSpacing: '-0.01em' }}>
             {orderId}
           </div>
-          <div className="mono" style={{ fontSize: 11, marginTop: 8, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            EMAILED A COPY · ALEX@EXAMPLE.COM
-          </div>
+          {email && (
+            <div className="mono" style={{ fontSize: 11, marginTop: 8, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              EMAILED A COPY · {email.toUpperCase()}
+            </div>
+          )}
         </div>
         <div style={{ paddingLeft: 32 }}>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>

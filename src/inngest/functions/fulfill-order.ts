@@ -1,9 +1,7 @@
-import Stripe from 'stripe';
 import { inngest } from '../client';
 import { orderChannel, adminChannel } from '../channels';
 import { appendOrder } from '@/lib/sheets';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripe } from '@/lib/stripe';
 
 type LineItem = {
   description: string | null;
@@ -99,7 +97,7 @@ export const fulfillOrder = inngest.createFunction(
       if (!stripePaymentIntentId) {
         return { status: 'mocked', amount: amountTotal, currency };
       }
-      const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+      const pi = await getStripe().paymentIntents.retrieve(stripePaymentIntentId);
       if (pi.status !== 'succeeded') {
         throw new Error(`PaymentIntent ${pi.id} not succeeded: ${pi.status}`);
       }

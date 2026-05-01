@@ -1,13 +1,12 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { orderChannel } from '@/inngest/channels';
 import { fetchOrder } from '@/lib/sheets';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripe } from '@/lib/stripe';
 
 export async function fetchOrderSubscriptionToken(orderId: string) {
   const token = await getSubscriptionToken(inngest, {
@@ -40,7 +39,7 @@ export async function unlockOrderViewing(
 
   let session: Stripe.Checkout.Session;
   try {
-    session = await stripe.checkout.sessions.retrieve(sessionId);
+    session = await getStripe().checkout.sessions.retrieve(sessionId);
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'stripe retrieve failed' };
   }

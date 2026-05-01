@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+import { getStripe } from '@/lib/stripe';
 import { inngest } from '@/inngest/client';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -14,7 +13,7 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event;
   try {
-    event = await stripe.webhooks.constructEventAsync(
+    event = await getStripe().webhooks.constructEventAsync(
       body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET!
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
     const session = event.data.object;
     const orderId = session.metadata?.orderId ?? session.id;
 
-    const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
+    const lineItems = await getStripe().checkout.sessions.listLineItems(session.id, {
       expand: ['data.price.product'],
     });
 

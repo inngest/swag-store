@@ -66,6 +66,14 @@ export async function POST(req: NextRequest) {
         },
         amountTotal: session.amount_total,
         currency: session.currency,
+        discount: session.metadata?.discountCode
+          ? {
+              code: session.metadata.discountCode,
+              amountCents:
+                session.total_details?.amount_discount ??
+                Number(session.metadata.discountAmountCents ?? 0),
+            }
+          : null,
         lineItems: lineItems.data.map((li) => {
           const product =
             typeof li.price?.product === 'object' && li.price?.product
@@ -78,7 +86,8 @@ export async function POST(req: NextRequest) {
             amountTotal: li.amount_total,
             priceId: typeof li.price === 'string' ? li.price : li.price?.id,
             productId:
-              typeof li.price?.product === 'string' ? li.price.product : product?.id,
+              meta.productId ||
+              (typeof li.price?.product === 'string' ? li.price.product : product?.id),
             productName: product?.name,
             sku: meta.sku || undefined,
             variantId: meta.variantId || undefined,

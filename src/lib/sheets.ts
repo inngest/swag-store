@@ -17,6 +17,8 @@ export type OrderRow = {
   status: string;
   tracking: string;
   notes: string;
+  discountCode?: string;
+  discountAmountCents?: number;
 };
 
 const HEADERS: Array<keyof OrderRow> = [
@@ -36,6 +38,8 @@ const HEADERS: Array<keyof OrderRow> = [
   'status',
   'tracking',
   'notes',
+  'discountCode',
+  'discountAmountCents',
 ];
 
 let cached: sheets_v4.Sheets | null = null;
@@ -69,6 +73,16 @@ function sheetId(): string {
 
 function sheetName(): string {
   return process.env.ORDERS_SHEET_NAME ?? 'Sheet1';
+}
+
+function inventorySheetId(): string {
+  const id = process.env.INVENTORY_SHEET_ID ?? process.env.ORDERS_SHEET_ID;
+  if (!id) throw new Error('INVENTORY_SHEET_ID or ORDERS_SHEET_ID is not set');
+  return id;
+}
+
+function inventorySheetName(): string {
+  return process.env.INVENTORY_SHEET_NAME ?? 'Inventory';
 }
 
 export async function appendOrder(row: OrderRow): Promise<void> {
@@ -143,4 +157,31 @@ export async function fetchOrder(orderId: string): Promise<OrderDetail | null> {
     status: String(row[13] ?? ''),
     tracking: String(row[14] ?? ''),
   };
+}
+
+export async function fetchInventorySheetRows(): Promise<Array<Record<string, string>>> {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: inventorySheetId(),
+    range: `${inventorySheetName()}!A:Z`,
+  });
+
+  const rows = res.data.values ?? [];
+  const headers = (rows[0] ?? []).map((header) => normalizeHeader(String(header ?? '')));
+  return rows.slice(1).map((row) => {
+    const out: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (!header) return;
+      out[header] = String(row[index] ?? '').trim();
+    });
+    return out;
+  });
+}
+
+function normalizeHeader(header: string): string {
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }

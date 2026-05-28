@@ -1,9 +1,12 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { PRODUCTS, getProduct, formatPrice } from '@/lib/catalog';
+import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import { getPublicProduct, listPublicProducts } from '@/lib/store-db';
 import { AddToCartButton } from '@/components/AddToCartButton';
 import { ProductCover } from '@/components/atoms/ProductCover';
 import { SectionHead } from '@/components/atoms/SectionHead';
+
+export const dynamic = 'force-dynamic';
 
 export async function generateStaticParams() {
   return PRODUCTS.map((p) => ({ slug: p.slug }));
@@ -11,11 +14,15 @@ export async function generateStaticParams() {
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const product = getProduct(slug);
+  const [product, products] = await Promise.all([
+    getPublicProduct(slug),
+    listPublicProducts(),
+  ]);
   if (!product) notFound();
 
-  const productIndex = PRODUCTS.findIndex((p) => p.id === product.id);
-  const others = PRODUCTS.filter((p) => p.id !== product.id);
+  const productIndex = products.findIndex((p) => p.id === product.id);
+  const others = products.filter((p) => p.id !== product.id);
+  const totalStock = product.variants.reduce((sum, variant) => sum + variant.stock, 0);
 
   return (
     <div>
@@ -48,6 +55,9 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               <div className="display tabnum" style={{ fontSize: 44, fontWeight: 400, lineHeight: 1 }}>
                 {formatPrice(product.price)}
               </div>
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 14 }}>
+              LIVE INVENTORY · {totalStock} AVAILABLE
             </div>
           </div>
 

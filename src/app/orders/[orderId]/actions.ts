@@ -5,7 +5,7 @@ import type Stripe from 'stripe';
 import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { orderChannel } from '@/inngest/channels';
-import { fetchOrder } from '@/lib/sheets';
+import { fetchOrder } from '@/lib/store-db';
 import { getStripe } from '@/lib/stripe';
 
 export async function fetchOrderSubscriptionToken(orderId: string) {
@@ -23,7 +23,18 @@ export async function fetchOrderSubscriptionToken(orderId: string) {
 }
 
 export async function fetchOrderDetailAction(orderId: string) {
-  return fetchOrder(orderId);
+  const detail = await fetchOrder(orderId);
+  if (!detail) return null;
+
+  const cookieStore = await cookies();
+  const unlocked = cookieStore.get(`order_unlock_${orderId}`)?.value === '1';
+  if (unlocked) return detail;
+
+  return {
+    ...detail,
+    email: maskEmail(detail.email),
+    name: '',
+  };
 }
 
 // Called from the confirmation page after a successful Stripe redirect.
@@ -61,4 +72,11 @@ export async function unlockOrderViewing(
     email: session.customer_details?.email ?? session.customer_email ?? null,
     name: session.customer_details?.name ?? null,
   };
+}
+
+function maskEmail(email: string): string {
+  if (!email) return '';
+  const [local = '', domain = ''] = email.split('@');
+  const [domainName = '', tld = ''] = domain.split('.');
+  return `${'*'.repeat(Math.max(local.length, 4))}@${'*'.repeat(Math.max(domainName.length, 4))}${tld ? `.${tld}` : ''}`;
 }

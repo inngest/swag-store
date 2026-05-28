@@ -32,5 +32,13 @@ export const adminChannel = channel({
         ts: z.number(),
       }),
     },
+    import: {
+      schema: z.object({
+        importRunId: z.number().optional(),
+        status: z.enum(['running', 'complete', 'failed']),
+        message: z.string(),
+        ts: z.number(),
+      }),
+    },
   },
 });

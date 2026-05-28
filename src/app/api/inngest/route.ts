@@ -1,6 +1,8 @@
 import { serve } from 'inngest/next';
 import { inngest } from '@/inngest/client';
 import { fulfillOrder } from '@/inngest/functions/fulfill-order';
+import { importInventory } from '@/inngest/functions/import-inventory';
+import { updateOrderStatusFunction } from '@/inngest/functions/update-order-status';
 
 // ─── Inngest API Route ────────────────────────────────────────────────────
 // This is the single endpoint that Inngest Cloud calls to execute functions.
@@ -9,5 +11,5 @@ import { fulfillOrder } from '@/inngest/functions/fulfill-order';
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [fulfillOrder],
+  functions: [fulfillOrder, importInventory, updateOrderStatusFunction],
 });

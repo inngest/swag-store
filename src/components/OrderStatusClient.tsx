@@ -15,6 +15,7 @@
 //   4. Source view — fulfill-order.ts with active step highlighted in citrus
 
 import * as React from 'react';
+import Link from 'next/link';
 import { subscribe } from 'inngest/realtime';
 import { StepDot } from './atoms/WorkflowTracker';
 import {
@@ -34,8 +35,8 @@ const STEPS = [
     output: {} as Record<string, unknown>,
   },
   {
-    name: 'send-confirmation',
-    detail: 'email.send(template: "order_confirmation")',
+    name: 'record-order',
+    detail: 'orders.insert(status: "pending")',
     output: {} as Record<string, unknown>,
   },
 ];
@@ -55,13 +56,6 @@ type Hydrated = {
   name: string;
   createdAt: string;
 };
-
-function maskEmail(email: string): string {
-  if (!email) return '';
-  const [local = '', domain = ''] = email.split('@');
-  const [domainName = '', tld = ''] = domain.split('.');
-  return `${'*'.repeat(Math.max(local.length, 4))}@${'*'.repeat(Math.max(domainName.length, 4))}${tld ? `.${tld}` : ''}`;
-}
 
 export function OrderStatusClient({
   orderId,
@@ -161,10 +155,10 @@ export function OrderStatusClient({
         reservedAt: hydrated.createdAt,
       };
     }
-    if (s.name === 'send-confirmation') {
+    if (s.name === 'record-order') {
       return {
-        recipient: publicView ? maskEmail(hydrated.email) : hydrated.email,
-        sentAt: hydrated.createdAt,
+        status: 'pending',
+        recordedAt: hydrated.createdAt,
       };
     }
     return undefined;
@@ -189,7 +183,7 @@ export function OrderStatusClient({
       // Synthesize a log timeline from the recorded order. Real timestamps
       // aren't preserved past the workflow, so we offset evenly off createdAt.
       const base = new Date(hydrated.createdAt).getTime();
-      const stepNames = ['capture-payment', 'reserve-inventory', 'send-confirmation'] as const;
+      const stepNames = ['capture-payment', 'reserve-inventory', 'record-order'] as const;
       const entries: Array<{ ts: string; level: string; msg: string }> = [];
       stepNames.forEach((name, i) => {
         entries.push({
@@ -262,7 +256,7 @@ export function OrderStatusClient({
       {/* ─── Header ─── */}
       <div style={{ background: 'var(--nebula)', color: 'var(--paper)', borderBottom: '1px solid var(--ink)' }}>
         <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid rgba(245, 240, 232, 0.1)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(245, 240, 232, 0.6)' }}>
-          <a href="/">← STORE</a>
+          <Link href="/">← STORE</Link>
           <span>06 / ORDER STATUS · {orderId}</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <span className="live-dot" />
@@ -272,10 +266,10 @@ export function OrderStatusClient({
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', padding: '40px 32px', gap: 32 }}>
           <div>
             <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--citrus)', marginBottom: 18 }}>
-              {allDone ? 'FULFILLED' : 'IN PROGRESS · LIVE'}
+              {allDone ? 'ORDER RECEIVED' : 'IN PROGRESS · LIVE'}
             </div>
             <h1 className="display" style={{ fontSize: 'clamp(64px, 9vw, 144px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
-              {allDone ? 'Shipped.' : 'Shipping…'}
+              {allDone ? 'Received.' : 'Shipping…'}
             </h1>
             <p style={{ fontSize: 15, lineHeight: 1.55, maxWidth: 520, marginTop: 24, color: 'rgba(245, 240, 232, 0.78)' }}>
               You&apos;re watching the live execution of <span className="mono">fulfill-order.ts</span>, an Inngest durable function. Each step is independently retried, persisted, and observable. This page subscribes to Realtime channel <span className="mono">order:{orderId}</span>.
@@ -447,8 +441,8 @@ function CodeBlock({ activeIdx }: { activeIdx: number }) {
     { tokens: [['com', '    // 2 — reserve inventory']], stepIdx: 1 },
     { tokens: [['kw', '    await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"reserve-inventory"'], ['pun', ', ...);']], stepIdx: 1 },
     { tokens: [] },
-    { tokens: [['com', '    // 3 — send confirmation email']], stepIdx: 2 },
-    { tokens: [['kw', '    await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"send-confirmation"'], ['pun', ', ...);']], stepIdx: 2 },
+    { tokens: [['com', '    // 3 — record pending order']], stepIdx: 2 },
+    { tokens: [['kw', '    await'], ['fn', ' step'], ['pun', '.'], ['fn', 'run'], ['pun', '('], ['str', '"record-order"'], ['pun', ', ...);']], stepIdx: 2 },
     { tokens: [] },
     { tokens: [['pun', '  }']] },
     { tokens: [['pun', ');']] },

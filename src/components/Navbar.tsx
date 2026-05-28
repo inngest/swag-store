@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 import { useCart } from '@/lib/cart-context';
 import { Logo } from './atoms/brand-marks';
 
@@ -80,6 +81,21 @@ export function Navbar() {
             ))}
           </nav>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <Show when="signed-out">
+              <SignInButton mode="modal">
+                <button className="mono nav-pill" style={{ padding: '10px 12px', border: '1px solid var(--ink)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  SIGN IN
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="mono nav-pill" style={{ padding: '10px 12px', border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--paper)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  SIGN UP
+                </button>
+              </SignUpButton>
+            </Show>
+            <Show when="signed-in">
+              <UserButton />
+            </Show>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               <span className="live-dot" style={{ display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }} />
               REALTIME ON

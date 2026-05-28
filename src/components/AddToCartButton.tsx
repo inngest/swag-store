@@ -11,16 +11,18 @@ export function AddToCartButton({ product }: { product: Product }) {
   const [color, setColor] = useState(product.colors?.[0]);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
+  const variant = product.variants.find(
+    (v) => (!size || v.size === size) && (!color || v.color === color.name),
+  ) ?? product.variants[0];
+  const availableStock = variant?.stock ?? 0;
+  const selectedQty = Math.min(qty, Math.max(1, availableStock));
 
   const handleAdd = () => {
-    const variant = product.variants.find(
-      (v) => (!size || v.size === size) && (!color || v.color === color.name),
-    ) ?? product.variants[0];
-    if (!variant) return;
+    if (!variant || availableStock <= 0) return;
     addItem({
       productId: product.id,
       variantId: variant.id,
-      quantity: qty,
+      quantity: selectedQty,
       size,
       color: color?.name,
     });
@@ -68,7 +70,9 @@ export function AddToCartButton({ product }: { product: Product }) {
               <button
                 key={s}
                 onClick={() => setSize(s)}
+                disabled={(product.variants.find((v) => v.size === s && (!color || v.color === color.name))?.stock ?? 0) <= 0}
                 className={`chip mono ${size === s ? 'active' : ''}`}
+                style={{ opacity: (product.variants.find((v) => v.size === s && (!color || v.color === color.name))?.stock ?? 0) <= 0 ? 0.35 : 1 }}
               >
                 {s}
               </button>
@@ -80,12 +84,15 @@ export function AddToCartButton({ product }: { product: Product }) {
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', marginTop: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--ink)', padding: '0 12px', gap: 14 }}>
           <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="mono" style={{ fontSize: 18, width: 24 }}>−</button>
-          <span className="mono tabnum" style={{ fontSize: 14, minWidth: 16, textAlign: 'center' }}>{qty}</span>
-          <button onClick={() => setQty((q) => q + 1)} className="mono" style={{ fontSize: 18, width: 24 }}>+</button>
+          <span className="mono tabnum" style={{ fontSize: 14, minWidth: 16, textAlign: 'center' }}>{selectedQty}</span>
+          <button onClick={() => setQty((q) => Math.min(availableStock, q + 1))} className="mono" style={{ fontSize: 18, width: 24 }}>+</button>
         </div>
-        <button onClick={handleAdd} className="btn btn-citrus square" style={{ flex: 1 }}>
-          {added ? 'ADDED ✓' : `ADD TO CART — ${formatPrice(product.price * qty)}`}
+        <button onClick={handleAdd} disabled={availableStock <= 0} className="btn btn-citrus square" style={{ flex: 1, opacity: availableStock <= 0 ? 0.45 : 1 }}>
+          {availableStock <= 0 ? 'SOLD OUT' : added ? 'ADDED ✓' : `ADD TO CART — ${formatPrice(product.price * selectedQty)}`}
         </button>
+      </div>
+      <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        {availableStock > 0 ? `${availableStock} AVAILABLE` : 'OUT OF STOCK'}
       </div>
     </div>
   );

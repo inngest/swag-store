@@ -60,6 +60,39 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 
 Visit [http://localhost:3000](http://localhost:3000) to browse, [http://localhost:8288](http://localhost:8288) for the Inngest dashboard, [http://localhost:3000/admin](http://localhost:3000/admin) for the live order tracker.
 
+## AI/API/MCP access
+
+Set `SWAG_STORE_API_TOKEN` and call automation endpoints with:
+
+```bash
+Authorization: Bearer $SWAG_STORE_API_TOKEN
+```
+
+Admins can also generate revocable API tokens from `/admin` under **API Tokens**. Dashboard-generated tokens are stored hashed, shown once, and work for both REST and MCP access.
+
+- `GET /api/ai/products` lists product and variant IDs.
+- `POST /api/ai/discount-codes` generates a single-use `sales_credit` ($100) or `devrel_comp` (100%) code.
+- `POST /api/ai/orders` submits an order. Fully discounted orders are placed directly through Inngest; paid orders return a Stripe Checkout URL.
+- `POST /api/mcp` exposes the same capabilities as MCP tools: `list_products`, `generate_discount_code`, and `submit_order`.
+
+Example MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "inngest-swag-store": {
+      "type": "http",
+      "url": "https://swag.inngest.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SWAG_STORE_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Agents should call `list_products` before ordering, use `generate_discount_code` for single-use $100 sales credits or 100% devrel comp codes, then call `submit_order` only after the user has provided or approved the exact items plus customer and shipping details.
+
 ## Project layout
 
 | Path | Purpose |

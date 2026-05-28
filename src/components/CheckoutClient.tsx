@@ -2,28 +2,45 @@
 
 import * as React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useCart } from '@/lib/cart-context';
-import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import { formatPrice, type Product } from '@/lib/catalog';
 import { StepDot } from './atoms/WorkflowTracker';
 
 type Stage = 'review' | 'creating' | 'redirecting' | 'error';
+type AppliedDiscount = {
+  code: string;
+  label: string;
+  type: 'amount_off' | 'percent_off';
+  discountCents: number;
+  amountOffCents: number | null;
+  percentOff: number | null;
+};
 
-export function CheckoutClient() {
+export function CheckoutClient({ products }: { products: Product[] }) {
   const { state } = useCart();
   const [stage, setStage] = useState<Stage>('review');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [discountInput, setDiscountInput] = useState('');
+  const [appliedDiscount, setAppliedDiscount] = useState<AppliedDiscount | null>(null);
+  const [appliedDiscountCartSignature, setAppliedDiscountCartSignature] = useState<string | null>(null);
+  const [discountMessage, setDiscountMessage] = useState<string | null>(null);
+  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false);
 
   const lineItems = state.items.map((item) => {
-    const product = PRODUCTS.find((p) => p.id === item.productId);
+    const product = products.find((p) => p.id === item.productId);
     return { ...item, product };
   });
 
   const subtotalCents = lineItems.reduce((s, it) => s + (it.product?.price ?? 0) * it.quantity, 0);
   const subtotal = subtotalCents / 100;
-  const tax = +(subtotal * 0.0875).toFixed(2);
-  const shipping = subtotal > 40 ? 0 : 6;
-  const total = +(subtotal + tax + shipping).toFixed(2);
+  const cartSignature = JSON.stringify(state.items);
+  const activeDiscount =
+    appliedDiscountCartSignature === cartSignature ? appliedDiscount : null;
+  const discountCents = Math.min(activeDiscount?.discountCents ?? 0, subtotalCents);
+  const totalCents = Math.max(0, subtotalCents - discountCents);
+  const total = totalCents / 100;
 
   useEffect(() => {
     if (stage !== 'creating') return;
@@ -34,7 +51,7 @@ export function CheckoutClient() {
         const res = await fetch('/api/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: state.items }),
+          body: JSON.stringify({ items: state.items, discountCode: activeDiscount?.code }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
@@ -51,13 +68,43 @@ export function CheckoutClient() {
     return () => {
       cancelled = true;
     };
-  }, [stage, state.items]);
+  }, [stage, state.items, activeDiscount?.code]);
+
+  const applyDiscount = async () => {
+    const code = discountInput.trim();
+    if (!code) {
+      setDiscountMessage('Enter a discount code.');
+      return;
+    }
+
+    setIsApplyingDiscount(true);
+    setDiscountMessage(null);
+    try {
+      const res = await fetch('/api/discounts/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, items: state.items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Could not apply discount');
+      setAppliedDiscount(data.discount);
+      setAppliedDiscountCartSignature(cartSignature);
+      setDiscountInput(data.discount.code);
+      setDiscountMessage(`${data.discount.code} applied.`);
+    } catch (err) {
+      setAppliedDiscount(null);
+      setAppliedDiscountCartSignature(null);
+      setDiscountMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsApplyingDiscount(false);
+    }
+  };
 
   if (lineItems.length === 0) {
     return (
       <div style={{ padding: '80px 32px', textAlign: 'center' }}>
         <h1 className="display" style={{ fontSize: 56, fontWeight: 400, textTransform: 'uppercase' }}>Empty cart.</h1>
-        <a href="/" className="btn btn-primary square" style={{ marginTop: 24, display: 'inline-block' }}>BACK TO CATALOG</a>
+        <Link href="/" className="btn btn-primary square" style={{ marginTop: 24, display: 'inline-block' }}>BACK TO CATALOG</Link>
       </div>
     );
   }
@@ -65,7 +112,7 @@ export function CheckoutClient() {
   return (
     <div>
       <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
-        <a href="/">← BACK</a>
+        <Link href="/">← BACK</Link>
         <span>05 / CHECKOUT</span>
       </div>
 
@@ -98,8 +145,12 @@ export function CheckoutClient() {
           </div>
           <div style={{ marginTop: 20 }}>
             <Row label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
-            <Row label="Tax (8.75%)" value={`$${tax.toFixed(2)}`} />
-            <Row label="Shipping" value={shipping === 0 ? 'FREE' : `$${shipping.toFixed(2)}`} />
+            {activeDiscount && (
+              <Row
+                label={`Discount (${activeDiscount.code})`}
+                value={`-$${(discountCents / 100).toFixed(2)}`}
+              />
+            )}
             <div className="hr-soft" style={{ margin: '10px 0' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <span className="display" style={{ fontSize: 18, fontWeight: 500 }}>Total</span>
@@ -116,6 +167,47 @@ export function CheckoutClient() {
           <p style={{ fontSize: 13, lineHeight: 1.55, maxWidth: 380, color: 'var(--ink)' }}>
             We don&apos;t touch your card. Stripe handles checkout. When payment succeeds, a webhook fires <span className="mono">store/order.placed</span> and a durable Inngest workflow takes over.
           </p>
+
+          <div style={{ marginTop: 28, padding: 20, background: 'var(--paper)', border: '1px solid var(--ink)' }}>
+            <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
+              DISCOUNT CODE
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+              <input
+                value={discountInput}
+                onChange={(event) => setDiscountInput(event.target.value.toUpperCase())}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void applyDiscount();
+                  }
+                }}
+                placeholder="DEVREL100"
+                disabled={stage !== 'review'}
+                className="mono"
+                style={{
+                  minWidth: 0,
+                  border: '1px solid var(--ink)',
+                  background: 'var(--paper)',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  textTransform: 'uppercase',
+                }}
+              />
+              <button
+                className="btn btn-primary square"
+                onClick={() => void applyDiscount()}
+                disabled={stage !== 'review' || isApplyingDiscount}
+              >
+                {isApplyingDiscount ? 'CHECKING' : 'APPLY'}
+              </button>
+            </div>
+            {discountMessage && (
+              <div className="mono" style={{ marginTop: 10, fontSize: 10.5, color: activeDiscount ? 'var(--eon-moss)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {discountMessage}
+              </div>
+            )}
+          </div>
 
           <div style={{ marginTop: 32, padding: 20, background: 'var(--paper)', border: '1px solid var(--ink)' }}>
             <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>

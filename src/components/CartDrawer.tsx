@@ -3,15 +3,15 @@
 import * as React from 'react';
 import Image from 'next/image';
 import { useCart } from '@/lib/cart-context';
-import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import { formatPrice, type Product } from '@/lib/catalog';
 import { useRouter } from 'next/navigation';
 
-export function CartDrawer() {
+export function CartDrawer({ products }: { products: Product[] }) {
   const { state, closeCart, removeItem, updateQuantity } = useCart();
   const router = useRouter();
 
   const lineItems = state.items.map((item) => {
-    const product = PRODUCTS.find((p) => p.id === item.productId);
+    const product = products.find((p) => p.id === item.productId);
     return { ...item, product };
   });
 

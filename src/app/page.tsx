@@ -1,45 +1,40 @@
-'use client';
-
-import * as React from 'react';
 import Link from 'next/link';
-import { PRODUCTS, formatPrice, type Product } from '@/lib/catalog';
+import { formatPrice, type Product } from '@/lib/catalog';
+import { listPublicProducts } from '@/lib/store-db';
 import { Mark } from '@/components/atoms/brand-marks';
 import { SectionHead } from '@/components/atoms/SectionHead';
 import { WorkflowTracker } from '@/components/atoms/WorkflowTracker';
 import { ProductCover } from '@/components/atoms/ProductCover';
 
-export default function CatalogPage() {
+export const dynamic = 'force-dynamic';
+
+export default async function CatalogPage() {
+  const products = await listPublicProducts();
   return (
     <div>
       <Hero />
       <BrandBar />
-      <CatalogGrid />
+      <CatalogGrid products={products} />
       <ManifestoStrip />
     </div>
   );
 }
 
 function Hero() {
-  const [stepIdx, setStepIdx] = React.useState(1);
-  React.useEffect(() => {
-    const id = setInterval(() => setStepIdx((i) => (i + 1) % 4), 2400);
-    return () => clearInterval(id);
-  }, []);
-
   const trackerSteps = [
     { name: 'capture-payment', detail: 'stripe.payment_intent · usd 28.00', duration: '0.32s' },
     { name: 'reserve-inventory', detail: 'sku INN-TEE-01 · qty 1', duration: '0.18s' },
-    { name: 'send-confirmation', detail: 'to: alex@example.com', duration: '0.41s' },
+    { name: 'record-order', detail: 'status: pending · db: railway', duration: '0.41s' },
   ];
 
   return (
-    <section style={{ background: 'var(--citrus)', color: 'var(--nebula)', borderBottom: '1px solid var(--ink)', position: 'relative', overflow: 'hidden' }}>
+    <section style={{ background: 'var(--hero-bg)', color: 'var(--hero-fg)', borderBottom: '1px solid var(--ink)', position: 'relative', overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr', padding: '32px 32px 0 32px', minHeight: 520, gap: 32 }}>
         <div style={{ paddingBottom: 40 }}>
           <div className="mono" style={{ fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 22 }}>
             01 / SWAG · APR 2026 · BUILT DURABLY
           </div>
-          <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0, textWrap: 'balance' as any }}>
+          <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0, textWrap: 'balance' }}>
             Wear<br />the<br />workflow.
           </h1>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 32, maxWidth: 720 }}>
@@ -54,20 +49,20 @@ function Hero() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 0, marginTop: 36 }}>
-            <button className="btn btn-primary square" onClick={() => document.getElementById('catalog-grid')?.scrollIntoView({ behavior: 'smooth' })}>
+            <Link className="btn btn-primary btn-hero-primary square" href="#catalog-grid">
               Shop the catalog →
-            </button>
-            <Link className="btn square" style={{ borderLeft: 0, background: 'transparent', color: 'var(--nebula)' }} href="/orders/ord_demo01">
+            </Link>
+            <Link className="btn btn-hero-secondary square" href="/orders/ord_demo01">
               See an order ship live ↗
             </Link>
           </div>
         </div>
         <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', paddingBottom: 32 }}>
-          <WorkflowTracker steps={trackerSteps} activeIdx={stepIdx > 2 ? 3 : stepIdx} label="fulfill-order.ts" />
+          <WorkflowTracker steps={trackerSteps} activeIdx={1} label="fulfill-order.ts" />
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid var(--ink)' }}>
+      <div style={{ borderTop: '1px solid var(--ink)', background: 'var(--hero-strip-bg)', color: 'var(--hero-strip-fg)' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 1fr 0.4fr', padding: '16px 32px' }}>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             01.1<br />01.2<br />01.3<br />01.4
@@ -79,7 +74,7 @@ function Hero() {
             INNGEST HAT
           </div>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'right', alignSelf: 'end' }}>
-            <Mark width={28} color="#1A161C" />
+            <Mark width={28} />
           </div>
         </div>
       </div>
@@ -111,7 +106,7 @@ function BrandBar() {
   );
 }
 
-function CatalogGrid() {
+function CatalogGrid({ products }: { products: Product[] }) {
   return (
     <section id="catalog-grid">
       <SectionHead
@@ -126,7 +121,7 @@ function CatalogGrid() {
         ]}
       />
       <div className="editorial-grid">
-        {PRODUCTS.map((p, i) => (
+        {products.map((p, i) => (
           <ProductCard key={p.id} product={p} index={i} />
         ))}
       </div>
@@ -135,22 +130,18 @@ function CatalogGrid() {
 }
 
 function ProductCard({ product, index }: { product: Product; index: number }) {
-  const [hover, setHover] = React.useState(false);
+  const totalStock = product.variants.reduce((sum, variant) => sum + variant.stock, 0);
   return (
     <Link
       href={`/products/${product.slug}`}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
       style={{ position: 'relative', cursor: 'pointer', padding: 0, display: 'block' }}
     >
       <div style={{ aspectRatio: '1.05 / 1', position: 'relative', overflow: 'hidden', background: 'var(--bone)' }}>
         <ProductCover product={product} />
         <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          {hover && (
-            <div className="mono slide-up" style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '6px 10px', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              VIEW PRODUCT →
-            </div>
-          )}
+          <div className="mono" style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '6px 10px', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {totalStock > 0 ? `${totalStock} IN STOCK` : 'SOLD OUT'}
+          </div>
         </div>
       </div>
       <div style={{ padding: '20px 24px 24px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'end' }}>

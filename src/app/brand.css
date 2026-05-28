@@ -4,8 +4,27 @@
    un-layered custom CSS, so these are intentionally separate. */
 
 :root {
-  --citrus: #59A569;
-  --citrus-deep: #3F8D52;
+  --coral: #FB6142;
+  --coral-soft: #FF9883;
+  --palette-primary: #212121;
+  --palette-primary-fg: var(--coral);
+  --palette-secondary: #212121;
+  --palette-secondary-fg: var(--coral-soft);
+  --hero-bg: var(--palette-primary);
+  --hero-fg: var(--palette-primary-fg);
+  --hero-strip-bg: var(--palette-secondary);
+  --hero-strip-fg: var(--palette-secondary-fg);
+  --hero-primary-cta-bg: #020202;
+  --hero-primary-cta-fg: var(--coral);
+  --hero-primary-cta-hover-bg: var(--coral-soft);
+  --hero-primary-cta-hover-fg: #020202;
+  --hero-secondary-cta-bg: var(--palette-secondary);
+  --hero-secondary-cta-fg: var(--palette-secondary-fg);
+  --hero-secondary-cta-hover-bg: var(--coral-soft);
+  --hero-secondary-cta-hover-fg: #020202;
+  --hero-secondary-divider-hover: #020202;
+  --citrus: var(--coral);
+  --citrus-deep: var(--coral-soft);
   --nebula: #1A161C;
   --ink: #1A161C;
   --paper: #FFFFFF;
@@ -13,14 +32,15 @@
   --rule: #1A161C;
   --rule-soft: rgba(26, 22, 28, 0.16);
   --muted: #6B6670;
-  --ok: #59A569;
+  --ok: var(--coral-soft);
   --pending: #C7C2BE;
 
   --citrine: #EFE915;
   --quantum: #362C40;
   --solar-lux: #CBB26A;
-  --matcha: #59A569;
-  --eon-moss: #006250;
+  --coral-tint: var(--coral-soft);
+  --matcha: #00A67B;
+  --eon-moss: #00A67B;
   --cloud: #EEECE6;
   --dune: #B17A50;
 }
@@ -86,6 +106,10 @@ input, select { font-family: inherit; }
 .btn-citrus:hover { background: var(--nebula); color: var(--citrus); border-color: var(--nebula); }
 .btn-ghost { background: transparent; color: var(--ink); }
 .btn-ghost:hover { background: var(--ink); color: var(--paper); }
+.btn-hero-primary { background: var(--hero-primary-cta-bg); color: var(--hero-primary-cta-fg); }
+.btn-hero-primary:hover { background: var(--hero-primary-cta-hover-bg); color: var(--hero-primary-cta-hover-fg); border-color: var(--ink); }
+.btn-hero-secondary { background: var(--hero-secondary-cta-bg); color: var(--hero-secondary-cta-fg); border-left-color: var(--ink); margin-left: -1px; }
+.btn-hero-secondary:hover { background: var(--hero-secondary-cta-hover-bg); color: var(--hero-secondary-cta-hover-fg); border-color: var(--ink); border-left-color: var(--hero-secondary-divider-hover); }
 
 .nav-pill { transition: background 160ms; }
 .nav-pill:hover { background: rgba(26, 22, 28, 0.06); }
@@ -101,10 +125,10 @@ input, select { font-family: inherit; }
   white-space: pre;
 }
 .code-line { display: block; }
-.code-line.active { background: rgba(89, 165, 105, 0.16); display: block; margin: 0 -24px; padding: 0 24px; border-left: 2px solid var(--citrus); padding-left: 22px; }
+.code-line.active { background: rgba(251, 97, 66, 0.14); display: block; margin: 0 -24px; padding: 0 24px; border-left: 2px solid var(--citrus); padding-left: 22px; }
 .tok-kw { color: #FF9A4D; }
 .tok-fn { color: #FFD9B8; }
-.tok-str { color: #B8E1D2; }
+.tok-str { color: #FF9883; }
 .tok-com { color: #6B6670; font-style: italic; }
 .tok-pun { color: #8B848D; }
 .tok-num { color: #FFB37A; }
@@ -128,8 +152,8 @@ input, select { font-family: inherit; }
 .meta-row .plus { color: var(--ink); }
 
 .gradient-placeholder { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.04) 0 1px, transparent 1px 14px), linear-gradient(135deg, var(--bone), #ECE6DD); }
-.gradient-placeholder-dark { background: repeating-linear-gradient(135deg, rgba(89,165,105,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #2A2228, #1A161C); }
-.gradient-placeholder-citrus { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #59A569, #3F8D52); }
+.gradient-placeholder-dark { background: repeating-linear-gradient(135deg, rgba(251,97,66,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #2A2228, #1A161C); }
+.gradient-placeholder-citrus { background: repeating-linear-gradient(135deg, rgba(26,22,28,0.10) 0 1px, transparent 1px 14px), linear-gradient(135deg, #FB6142, #FF9883); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

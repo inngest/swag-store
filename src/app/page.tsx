@@ -39,13 +39,13 @@ function Hero() {
           </h1>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 32, maxWidth: 720 }}>
             <p style={{ fontSize: 14, lineHeight: 1.55, margin: 0, maxWidth: 380 }}>
-              Four objects. One brand. Every one of them shipped to you by a durable Inngest workflow you can watch run in real-time.
+              Office-stock swag, shipped by a durable Inngest workflow you can watch run in real-time.
             </p>
             <div className="mono" style={{ fontSize: 11, lineHeight: 1.7, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               <div>+ FREE shipping over $40</div>
               <div>+ Ships in 3—5 days</div>
               <div>+ Returns within 30</div>
-              <div>+ LA-printed, small batch</div>
+              <div>+ Railway-backed inventory</div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 0, marginTop: 36 }}>
@@ -65,13 +65,11 @@ function Hero() {
       <div style={{ borderTop: '1px solid var(--ink)', background: 'var(--hero-strip-bg)', color: 'var(--hero-strip-fg)' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 1fr 0.4fr', padding: '16px 32px' }}>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            01.1<br />01.2<br />01.3<br />01.4
+            01.1<br />01.2
           </div>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', lineHeight: 1.55 }}>
-            DURABLY YOURS — TEE<br />
-            INNGEST HOODIE<br />
-            STEP FUNCTION — STICKER PACK<br />
-            INNGEST HAT
+            ANTI ANTI INFRA CO. TEE<br />
+            STEP.RUN SOCKS
           </div>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'right', alignSelf: 'end' }}>
             <Mark width={28} />
@@ -112,12 +110,10 @@ function CatalogGrid({ products }: { products: Product[] }) {
       <SectionHead
         num="2.0"
         title="THE CATALOG"
-        blurb="Four SKUs. No quarter releases, no drops, no scarcity bait. Restocked when stock dips below twenty units of any size — automated by, naturally, an Inngest workflow."
+        blurb="The orderable office inventory from the Swag Inventory page. Railway Postgres is the live backend; Inngest reserves stock during fulfillment."
         items={[
-          { idx: '2.1', label: 'DURABLY YOURS TEE' },
-          { idx: '2.2', label: 'INNGEST HOODIE' },
-          { idx: '2.3', label: 'STEP FUNCTION STICKERS' },
-          { idx: '2.4', label: 'INNGEST HAT' },
+          { idx: '2.1', label: 'ANTI ANTI INFRA CO. TEE' },
+          { idx: '2.2', label: 'STEP.RUN SOCKS' },
         ]}
       />
       <div className="editorial-grid">
@@ -158,7 +154,7 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
           <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 14, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', gap: 14 }}>
             <span>SKU {product.sku}</span>
             <span>·</span>
-            <span>{product.sizes && product.sizes.length === 1 ? 'ONE SIZE' : product.sizes ? product.sizes.join(' · ') : 'ONE SIZE'}</span>
+            <span>{product.sizes?.length ? product.sizes.join(' · ') : 'ONE SIZE'}</span>
           </div>
         </div>
         <div className="display tabnum" style={{ fontSize: 36, fontWeight: 400, lineHeight: 1 }}>
@@ -177,7 +173,7 @@ function ManifestoStrip() {
           3.0<br />MANIFESTO
         </div>
         <div className="display" style={{ fontSize: 'clamp(28px, 3.5vw, 48px)', lineHeight: 1.05, fontWeight: 400, letterSpacing: '-0.01em', maxWidth: 920 }}>
-          Most merch is afterthought. Ours runs on the same primitives we ship to customers. The store you&apos;re shopping was built on a livestream — checkout, fulfillment, and order tracking, all flowing through a durable workflow you can watch from the order page.
+          Most merch is afterthought. Ours runs on the same primitives we ship to customers. Checkout, fulfillment, inventory reservation, and order tracking all flow through a durable workflow backed by Railway Postgres.
         </div>
         <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', alignSelf: 'end' }}>
           — STERLING CHIN<br />

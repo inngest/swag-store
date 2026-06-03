@@ -5,6 +5,7 @@ import { inngest } from '@/inngest/client';
 import { adminChannel } from '@/inngest/channels';
 import { requireAdmin } from '@/lib/admin-auth';
 import { runSwagCodeAgent, type SwagCodeAgentKind } from '@/lib/discount-code-agent';
+import { normalizeProductInput, type ProductUpsertInput } from '@/lib/product-management';
 import {
   generateApiToken,
   isStoreDatabaseEnabled,
@@ -12,10 +13,12 @@ import {
   listAdminDiscountCodes,
   listAdminInventory,
   listAdminOrders,
+  listAdminProducts,
   listInventoryImportRuns,
   revokeApiToken,
   updateDiscountCodeActive,
   updateInventoryVariant,
+  upsertAdminProduct,
   upsertDiscountCode,
   type DiscountCodeType,
   type OrderStatus,
@@ -38,14 +41,15 @@ export async function fetchAdminSubscriptionToken() {
 
 export async function fetchAdminDashboardAction() {
   await requireAdmin();
-  const [inventory, orders, imports, discounts, apiTokens] = await Promise.all([
+  const [inventory, orders, imports, discounts, apiTokens, products] = await Promise.all([
     listAdminInventory(),
     listAdminOrders(),
     listInventoryImportRuns(),
     listAdminDiscountCodes(),
     listAdminApiTokens(),
+    listAdminProducts(),
   ]);
-  return { inventory, orders, imports, discounts, apiTokens };
+  return { inventory, orders, imports, discounts, apiTokens, products };
 }
 
 export async function updateInventoryAction(input: {
@@ -53,9 +57,38 @@ export async function updateInventoryAction(input: {
   stock: number;
   image?: string;
 }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   requireDatabaseForMutation();
   await updateInventoryVariant(input);
+  await inngest.send({
+    id: `inventory-changed-admin-${input.variantId}-${Date.now()}`,
+    name: 'store/inventory.changed',
+    data: {
+      source: 'admin-inventory-edit',
+      reason: 'Admin manually updated inventory',
+      actorEmail: admin.email,
+      variantIds: [input.variantId],
+    },
+  });
+}
+
+export async function upsertProductAction(input: ProductUpsertInput) {
+  const admin = await requireAdmin();
+  requireDatabaseForMutation();
+  const product = normalizeProductInput(input);
+  await upsertAdminProduct(product);
+  await inngest.send({
+    id: `inventory-changed-product-${product.id}-${Date.now()}`,
+    name: 'store/inventory.changed',
+    data: {
+      source: 'admin-product-upsert',
+      reason: 'Admin created or updated product inventory',
+      actorEmail: admin.email,
+      productId: product.id,
+      variantIds: product.variants.map((variant) => variant.id),
+    },
+  });
+  return product;
 }
 
 export async function requestInventoryImportAction() {

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { PRODUCTS, type Product, type ProductColor, type ProductSize } from './catalog';
+import { PRODUCTS, PRODUCT_SIZE_ORDER, type Product, type ProductColor, type ProductSize } from './catalog';
 import { getPool, hasDatabaseUrl } from './db';
 import type { OrderDetail, OrderRow } from './sheets';
 import {
@@ -27,9 +27,11 @@ export type StoreLineItem = {
 export type InventoryReservation = {
   sku: string;
   name: string;
+  variantId: string;
   size: string;
   color: string;
   quantity: number;
+  stockAfter: number | null;
   reservedAt: string;
 };
 
@@ -46,6 +48,57 @@ export type AdminInventoryRow = {
   stock: number;
   initialStock: number;
   updatedAt: string;
+};
+
+export type InventoryAdjustmentMode = 'receive_shipment' | 'audit_count' | 'manual_correction';
+
+export type InventoryAdjustmentInput = {
+  variantId?: string;
+  productId?: string;
+  sku?: string;
+  size?: string;
+  color?: string;
+  quantity?: number;
+  stock?: number;
+  note?: string;
+};
+
+export type InventoryAdjustmentPreview = {
+  ok: boolean;
+  mode: InventoryAdjustmentMode;
+  source: string;
+  reason: string;
+  items: Array<{
+    variantId: string;
+    productId: string;
+    productName: string;
+    sku: string;
+    size: string;
+    color: string;
+    previousStock: number;
+    quantityChange: number;
+    newStock: number;
+    note: string;
+  }>;
+  issues: Array<{
+    severity: 'warning' | 'error';
+    message: string;
+    item?: number;
+  }>;
+};
+
+export type InventoryAdjustmentRecord = InventoryAdjustmentPreview['items'][number] & {
+  id: number;
+  batchId: string;
+  mode: InventoryAdjustmentMode;
+  source: string;
+  reason: string;
+  actorEmail: string;
+  createdAt: string;
+};
+
+export type LowStockInventoryRow = AdminInventoryRow & {
+  threshold: number;
 };
 
 export type AdminOrder = {
@@ -123,6 +176,19 @@ export type GeneratedApiToken = {
 export type ApiTokenActor = {
   email: string;
 };
+
+function sizeOrderSql(column: string): string {
+  return `case upper(${column})
+    when 'XS' then 1
+    when 'S' then 2
+    when 'M' then 3
+    when 'L' then 4
+    when 'XL' then 5
+    when 'XXL' then 6
+    when 'XXXL' then 7
+    else 99
+  end`;
+}
 
 let readyPromise: Promise<void> | null = null;
 
@@ -225,6 +291,38 @@ async function ensureStoreSchema(): Promise<void> {
       error text not null default ''
     );
 
+    create table if not exists inventory_adjustments (
+      id bigserial primary key,
+      batch_id text not null,
+      created_at timestamptz not null default now(),
+      actor_email text not null default '',
+      source text not null default '',
+      reason text not null default '',
+      mode text not null,
+      product_id text not null default '',
+      product_name text not null default '',
+      sku text not null default '',
+      variant_id text not null default '',
+      size text not null default '',
+      color text not null default '',
+      previous_stock integer not null,
+      quantity_change integer not null,
+      new_stock integer not null,
+      note text not null default '',
+      constraint inventory_adjustments_mode_check check (mode in ('receive_shipment', 'audit_count', 'manual_correction'))
+    );
+
+    create index if not exists inventory_adjustments_batch_idx on inventory_adjustments (batch_id);
+    create index if not exists inventory_adjustments_variant_idx on inventory_adjustments (variant_id, created_at desc);
+
+    create table if not exists low_stock_notifications (
+      variant_id text primary key,
+      threshold integer not null,
+      last_stock integer not null,
+      last_notified_at timestamptz not null default now(),
+      resolved_at timestamptz
+    );
+
     create table if not exists discount_codes (
       code text primary key,
       label text not null default '',
@@ -292,7 +390,11 @@ export async function listPublicProducts(): Promise<Product[]> {
 
   const [productsRes, variantsRes] = await Promise.all([
     getPool().query('select * from products order by id'),
-    getPool().query('select * from product_variants order by id'),
+    getPool().query(
+      `select *
+       from product_variants
+       order by product_id, ${sizeOrderSql('size')}, color, id`,
+    ),
   ]);
 
   const variantsByProduct = new Map<string, Product['variants']>();
@@ -326,7 +428,7 @@ export async function listPublicProducts(): Promise<Product[]> {
     image: String(row.image ?? ''),
     imagePlaceholder: String(row.image_placeholder ?? ''),
     colors: parseJsonArray<ProductColor>(row.colors),
-    sizes: parseJsonArray<ProductSize>(row.sizes),
+    sizes: sortProductSizes(parseJsonArray<ProductSize>(row.sizes)),
     variants: variantsByProduct.get(String(row.id)) ?? [],
     featured: Boolean(row.featured),
     tags: parseJsonArray<string>(row.tags) ?? [],
@@ -336,6 +438,11 @@ export async function listPublicProducts(): Promise<Product[]> {
 export async function getPublicProduct(slug: string): Promise<Product | undefined> {
   const products = await listPublicProducts();
   return products.find((product) => product.slug === slug);
+}
+
+export async function listAdminProducts(): Promise<Product[]> {
+  const products = await listPublicProducts();
+  return products.sort((a, b) => a.name.localeCompare(b.name) || a.sku.localeCompare(b.sku));
 }
 
 export async function listAdminInventory(): Promise<AdminInventoryRow[]> {
@@ -355,7 +462,7 @@ export async function listAdminInventory(): Promise<AdminInventoryRow[]> {
         initialStock: variant.stock,
         updatedAt: new Date(0).toISOString(),
       })),
-    );
+    ).sort(compareInventoryRows);
   }
 
   await ensureStoreReady();
@@ -365,7 +472,7 @@ export async function listAdminInventory(): Promise<AdminInventoryRow[]> {
             v.initial_stock, v.updated_at
      from product_variants v
      join products p on p.id = v.product_id
-     order by p.name, v.size, v.color`,
+     order by p.name, ${sizeOrderSql('v.size')}, v.color, v.id`,
   );
 
   return res.rows.map((row) => ({
@@ -381,7 +488,91 @@ export async function listAdminInventory(): Promise<AdminInventoryRow[]> {
     stock: Number(row.stock ?? 0),
     initialStock: Number(row.initial_stock ?? 0),
     updatedAt: new Date(row.updated_at).toISOString(),
-  }));
+  })).sort(compareInventoryRows);
+}
+
+export async function listLowStockInventory(threshold: number): Promise<LowStockInventoryRow[]> {
+  const normalizedThreshold = normalizeLowStockThreshold(threshold);
+  const inventory = await listAdminInventory();
+  return inventory
+    .filter((row) => row.stock <= normalizedThreshold)
+    .map((row) => ({ ...row, threshold: normalizedThreshold }));
+}
+
+export async function recordLowStockNotificationCandidates({
+  threshold,
+  rows,
+}: {
+  threshold: number;
+  rows: LowStockInventoryRow[];
+}): Promise<LowStockInventoryRow[]> {
+  if (!isStoreDatabaseEnabled()) return rows;
+  await ensureStoreReady();
+
+  const normalizedThreshold = normalizeLowStockThreshold(threshold);
+  const currentLowVariantIds = rows.map((row) => row.variantId);
+  const client = await getPool().connect();
+  const notifyRows: LowStockInventoryRow[] = [];
+
+  try {
+    await client.query('begin');
+    if (currentLowVariantIds.length > 0) {
+      await client.query(
+        `update low_stock_notifications
+         set resolved_at = now()
+         where resolved_at is null
+           and not (variant_id = any($1::text[]))`,
+        [currentLowVariantIds],
+      );
+    } else {
+      await client.query(
+        `update low_stock_notifications
+         set resolved_at = now()
+         where resolved_at is null`,
+      );
+    }
+
+    for (const row of rows) {
+      const existing = await client.query(
+        `select threshold, last_stock, resolved_at
+         from low_stock_notifications
+         where variant_id = $1
+         for update`,
+        [row.variantId],
+      );
+      const current = existing.rows[0];
+      const shouldNotify =
+        !current ||
+        current.resolved_at ||
+        Number(current.threshold) !== normalizedThreshold ||
+        row.stock < Number(current.last_stock);
+
+      await client.query(
+        `insert into low_stock_notifications (variant_id, threshold, last_stock, last_notified_at, resolved_at)
+         values ($1, $2, $3, now(), null)
+         on conflict (variant_id) do update set
+           threshold = excluded.threshold,
+           last_stock = excluded.last_stock,
+           last_notified_at = case
+             when $4::boolean then now()
+             else low_stock_notifications.last_notified_at
+           end,
+           resolved_at = null`,
+        [row.variantId, normalizedThreshold, row.stock, shouldNotify],
+      );
+
+      if (shouldNotify) notifyRows.push(row);
+    }
+
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return notifyRows;
 }
 
 export async function updateInventoryVariant({
@@ -424,6 +615,200 @@ export async function updateInventoryVariant({
   }
 }
 
+export async function previewInventoryAdjustment({
+  mode,
+  source = '',
+  reason = '',
+  items,
+}: {
+  mode: InventoryAdjustmentMode;
+  source?: string;
+  reason?: string;
+  items: InventoryAdjustmentInput[];
+}): Promise<InventoryAdjustmentPreview> {
+  validateInventoryAdjustmentMode(mode);
+  const currentInventory = await listAdminInventory();
+  const issues: InventoryAdjustmentPreview['issues'] = [];
+  const previewItems: InventoryAdjustmentPreview['items'] = [];
+
+  if (!Array.isArray(items) || items.length === 0) {
+    issues.push({ severity: 'error', message: 'At least one inventory adjustment item is required.' });
+  }
+
+  items.forEach((item, index) => {
+    const row = findInventoryAdjustmentRow(currentInventory, item);
+    if (!row) {
+      issues.push({
+        severity: 'error',
+        item: index + 1,
+        message: `Item ${index + 1} did not match a current inventory variant.`,
+      });
+      return;
+    }
+
+    const quantityChange = inventoryQuantityChange(mode, item, row.stock);
+    if (quantityChange === null) {
+      issues.push({
+        severity: 'error',
+        item: index + 1,
+        message: inventoryQuantityError(mode, index + 1),
+      });
+      return;
+    }
+
+    const newStock = row.stock + quantityChange;
+    if (newStock < 0) {
+      issues.push({
+        severity: 'error',
+        item: index + 1,
+        message: `Item ${index + 1} would set stock below zero for ${row.productName} ${row.size} ${row.color}.`,
+      });
+      return;
+    }
+
+    previewItems.push({
+      variantId: row.variantId,
+      productId: row.productId,
+      productName: row.productName,
+      sku: row.sku,
+      size: row.size,
+      color: row.color,
+      previousStock: row.stock,
+      quantityChange,
+      newStock,
+      note: String(item.note ?? '').trim(),
+    });
+  });
+
+  if (new Set(previewItems.map((item) => item.variantId)).size !== previewItems.length) {
+    issues.push({
+      severity: 'error',
+      message: 'Each inventory adjustment may include a variant only once. Combine duplicate rows first.',
+    });
+  }
+
+  return {
+    ok: issues.every((issue) => issue.severity !== 'error'),
+    mode,
+    source: source.trim(),
+    reason: reason.trim(),
+    items: previewItems,
+    issues,
+  };
+}
+
+export async function applyInventoryAdjustment({
+  actorEmail,
+  mode,
+  source = '',
+  reason = '',
+  items,
+}: {
+  actorEmail: string;
+  mode: InventoryAdjustmentMode;
+  source?: string;
+  reason?: string;
+  items: InventoryAdjustmentInput[];
+}): Promise<{
+  batchId: string;
+  adjustments: InventoryAdjustmentRecord[];
+}> {
+  requireStoreDatabase();
+  await ensureStoreReady();
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) throw new Error('reason is required for inventory adjustments.');
+
+  const preview = await previewInventoryAdjustment({ mode, source, reason, items });
+  if (!preview.ok) {
+    throw new Error(preview.issues.map((issue) => issue.message).join(' '));
+  }
+
+  const batchId = `inv_${Date.now().toString(36)}_${randomCodeSuffix().toLowerCase()}`;
+  const client = await getPool().connect();
+  const records: InventoryAdjustmentRecord[] = [];
+
+  try {
+    await client.query('begin');
+    for (const item of preview.items) {
+      const locked = await client.query(
+        `select stock
+         from product_variants
+         where id = $1
+         for update`,
+        [item.variantId],
+      );
+      const currentStock = Number(locked.rows[0]?.stock ?? NaN);
+      if (!Number.isSafeInteger(currentStock)) {
+        throw new Error(`Variant not found while applying adjustment: ${item.variantId}`);
+      }
+
+      const newStock = currentStock + item.quantityChange;
+      if (newStock < 0) {
+        throw new Error(`Adjustment would set stock below zero for ${item.productName}.`);
+      }
+
+      await client.query(
+        `update product_variants
+         set stock = $1, updated_at = now()
+         where id = $2`,
+        [newStock, item.variantId],
+      );
+
+      const inserted = await client.query(
+        `insert into inventory_adjustments (
+           batch_id, actor_email, source, reason, mode, product_id, product_name,
+           sku, variant_id, size, color, previous_stock, quantity_change, new_stock, note
+         )
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         returning *`,
+        [
+          batchId,
+          actorEmail,
+          source.trim(),
+          trimmedReason,
+          mode,
+          item.productId,
+          item.productName,
+          item.sku,
+          item.variantId,
+          item.size,
+          item.color,
+          currentStock,
+          item.quantityChange,
+          newStock,
+          item.note,
+        ],
+      );
+      records.push(rowToInventoryAdjustmentRecord(inserted.rows[0]));
+    }
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { batchId, adjustments: records };
+}
+
+export async function listInventoryAdjustments({
+  limit = 50,
+}: {
+  limit?: number;
+} = {}): Promise<InventoryAdjustmentRecord[]> {
+  if (!isStoreDatabaseEnabled()) return [];
+  await ensureStoreReady();
+  const res = await getPool().query(
+    `select *
+     from inventory_adjustments
+     order by created_at desc, id desc
+     limit $1`,
+    [Math.max(1, Math.min(200, Math.floor(limit)))],
+  );
+  return res.rows.map(rowToInventoryAdjustmentRecord);
+}
+
 export async function validateCartAvailability(
   items: Array<{ productId: string; variantId: string; quantity: number }>,
 ): Promise<void> {
@@ -457,9 +842,11 @@ export async function reserveInventory({
     const reservations = (lineItems ?? []).map((item) => ({
       sku: item.sku ?? item.productId ?? 'unknown',
       name: item.productName ?? item.description ?? 'unknown',
+      variantId: item.variantId ?? '',
       size: item.size ?? '',
       color: item.color ?? '',
       quantity: item.quantity ?? 1,
+      stockAfter: null,
       reservedAt: new Date().toISOString(),
     }));
     return { reservations, count: reservations.length };
@@ -483,19 +870,22 @@ export async function reserveInventory({
         );
       }
 
-      await client.query(
+      const updated = await client.query(
         `update product_variants
          set stock = stock - $1, updated_at = now()
-         where id = $2`,
+         where id = $2
+         returning stock`,
         [quantity, variant.id],
       );
 
       reservations.push({
         sku: variant.sku,
         name: item.productName ?? item.description ?? variant.name,
+        variantId: variant.id,
         size: item.size ?? variant.size ?? '',
         color: item.color ?? variant.color ?? '',
         quantity,
+        stockAfter: Number(updated.rows[0]?.stock ?? 0),
         reservedAt,
       });
     }
@@ -1094,6 +1484,67 @@ export async function listInventoryImportRuns(): Promise<InventoryImportRun[]> {
   }));
 }
 
+export async function resetStoreInventoryFromCatalog({
+  actorEmail,
+  source = 'notion-swag-inventory',
+}: {
+  actorEmail: string;
+  source?: string;
+}): Promise<{
+  importRunId: number;
+  products: number;
+  variants: number;
+  source: string;
+}> {
+  requireStoreDatabase();
+  await ensureStoreReady();
+
+  const importRunId = await createInventoryImportRun({ source, actorEmail });
+  const productIds = PRODUCTS.map((product) => product.id);
+  const variantIds = PRODUCTS.flatMap((product) => product.variants.map((variant) => variant.id));
+
+  try {
+    for (const product of PRODUCTS) {
+      await upsertProduct(product, { preserveVariantStock: false });
+    }
+
+    await getPool().query(
+      'delete from product_variants where not (id = any($1::text[]))',
+      [variantIds],
+    );
+    await getPool().query(
+      'delete from products where not (id = any($1::text[]))',
+      [productIds],
+    );
+
+    const summary = {
+      products: productIds.length,
+      variants: variantIds.length,
+      source,
+    };
+    await completeInventoryImportRun({
+      id: importRunId,
+      status: 'complete',
+      summary,
+    });
+
+    return {
+      importRunId,
+      products: productIds.length,
+      variants: variantIds.length,
+      source,
+    };
+  } catch (err) {
+    await completeInventoryImportRun({
+      id: importRunId,
+      status: 'failed',
+      summary: {},
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
+
 export async function upsertProduct(
   product: Product,
   options: { preserveVariantStock?: boolean } = {},
@@ -1205,6 +1656,15 @@ export async function upsertProduct(
   }
 }
 
+export async function upsertAdminProduct(product: Product): Promise<void> {
+  requireStoreDatabase();
+  await upsertProduct(product, { preserveVariantStock: false });
+  await getPool().query(
+    'delete from product_variants where product_id = $1 and not (id = any($2::text[]))',
+    [product.id, product.variants.map((variant) => variant.id)],
+  );
+}
+
 async function findVariantForUpdate(
   client: PoolClient,
   item: StoreLineItem,
@@ -1240,6 +1700,92 @@ async function findVariantForUpdate(
   };
 }
 
+function findInventoryAdjustmentRow(
+  rows: AdminInventoryRow[],
+  item: InventoryAdjustmentInput,
+): AdminInventoryRow | undefined {
+  const variantId = item.variantId?.trim().toLowerCase();
+  if (variantId) return rows.find((row) => row.variantId.toLowerCase() === variantId);
+
+  const productId = item.productId?.trim().toLowerCase();
+  const sku = item.sku?.trim().toLowerCase();
+  const size = normalizeInventoryToken(item.size);
+  const color = normalizeInventoryToken(item.color);
+  const candidates = rows.filter((row) => {
+    if (productId && row.productId.toLowerCase() !== productId) return false;
+    if (sku && row.sku.toLowerCase() !== sku) return false;
+    if (size && normalizeInventoryToken(row.size) !== size) return false;
+    if (color && normalizeInventoryToken(row.color) !== color) return false;
+    return Boolean(productId || sku);
+  });
+
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1 && !size && !color) {
+    const singleVariantProduct = new Set(candidates.map((row) => row.productId)).size === 1;
+    return singleVariantProduct && candidates.length === 1 ? candidates[0] : undefined;
+  }
+  return undefined;
+}
+
+function inventoryQuantityChange(
+  mode: InventoryAdjustmentMode,
+  item: InventoryAdjustmentInput,
+  currentStock: number,
+): number | null {
+  if (mode === 'audit_count') {
+    const stock = Number(item.stock ?? item.quantity);
+    if (!Number.isSafeInteger(stock) || stock < 0) return null;
+    return stock - currentStock;
+  }
+
+  const quantity = Number(item.quantity);
+  if (!Number.isSafeInteger(quantity)) return null;
+  if (mode === 'receive_shipment') return quantity > 0 ? quantity : null;
+  return quantity === 0 ? null : quantity;
+}
+
+function inventoryQuantityError(mode: InventoryAdjustmentMode, itemNumber: number): string {
+  if (mode === 'audit_count') {
+    return `Item ${itemNumber} needs a non-negative integer stock count for audit_count.`;
+  }
+  if (mode === 'receive_shipment') {
+    return `Item ${itemNumber} needs a positive integer quantity for receive_shipment.`;
+  }
+  return `Item ${itemNumber} needs a non-zero integer quantity for manual_correction.`;
+}
+
+function validateInventoryAdjustmentMode(mode: InventoryAdjustmentMode): void {
+  if (mode !== 'receive_shipment' && mode !== 'audit_count' && mode !== 'manual_correction') {
+    throw new Error('mode must be receive_shipment, audit_count, or manual_correction.');
+  }
+}
+
+function normalizeInventoryToken(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function rowToInventoryAdjustmentRecord(row: Record<string, unknown>): InventoryAdjustmentRecord {
+  return {
+    id: Number(row.id),
+    batchId: String(row.batch_id ?? ''),
+    mode: row.mode === 'audit_count' || row.mode === 'manual_correction' ? row.mode : 'receive_shipment',
+    source: String(row.source ?? ''),
+    reason: String(row.reason ?? ''),
+    actorEmail: String(row.actor_email ?? ''),
+    createdAt: new Date(row.created_at as string | number | Date).toISOString(),
+    variantId: String(row.variant_id ?? ''),
+    productId: String(row.product_id ?? ''),
+    productName: String(row.product_name ?? ''),
+    sku: String(row.sku ?? ''),
+    size: String(row.size ?? ''),
+    color: String(row.color ?? ''),
+    previousStock: Number(row.previous_stock ?? 0),
+    quantityChange: Number(row.quantity_change ?? 0),
+    newStock: Number(row.new_stock ?? 0),
+    note: String(row.note ?? ''),
+  };
+}
+
 function parseJsonArray<T>(value: unknown): T[] | undefined {
   if (Array.isArray(value)) return value as T[];
   if (typeof value === 'string') {
@@ -1251,6 +1797,30 @@ function parseJsonArray<T>(value: unknown): T[] | undefined {
     }
   }
   return undefined;
+}
+
+function sortProductSizes(sizes: ProductSize[] | undefined): ProductSize[] | undefined {
+  if (!sizes) return undefined;
+  return [...sizes].sort((a, b) => sizeOrderRank(a) - sizeOrderRank(b));
+}
+
+function compareInventoryRows(a: AdminInventoryRow, b: AdminInventoryRow): number {
+  return (
+    a.productName.localeCompare(b.productName) ||
+    sizeOrderRank(a.size) - sizeOrderRank(b.size) ||
+    a.color.localeCompare(b.color) ||
+    a.variantId.localeCompare(b.variantId)
+  );
+}
+
+function sizeOrderRank(size: string | undefined): number {
+  const index = PRODUCT_SIZE_ORDER.indexOf(String(size ?? '').toUpperCase() as ProductSize);
+  return index === -1 ? 99 : index + 1;
+}
+
+function normalizeLowStockThreshold(value: number): number {
+  const threshold = Number(value);
+  return Number.isSafeInteger(threshold) && threshold >= 0 ? threshold : 5;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

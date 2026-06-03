@@ -32,6 +32,17 @@ export const importInventory = inngest.createFunction(
         ts: Date.now(),
       });
 
+      await step.sendEvent('check-low-stock-after-sheet-import', {
+        id: `inventory-changed-import-${result.importRunId}`,
+        name: 'store/inventory.changed',
+        data: {
+          source: 'inventory-sheet-import',
+          reason: 'Inventory sheet import completed',
+          importRunId: result.importRunId,
+          actorEmail: data.actorEmail ?? '',
+        },
+      });
+
       return result;
     } catch (err) {
       await step.realtime.publish('emit-import-failed', adminChannel.import, {

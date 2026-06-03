@@ -6,6 +6,7 @@ import {
   listAdminDiscountCodes,
   listAdminInventory,
   listAdminOrders,
+  listAdminProducts,
   listInventoryImportRuns,
 } from '@/lib/store-db';
 
@@ -30,12 +31,13 @@ export default async function AdminPage() {
     );
   }
 
-  const [inventory, orders, imports, discounts, apiTokens] = await Promise.all([
+  const [inventory, orders, imports, discounts, apiTokens, products] = await Promise.all([
     listAdminInventory(),
     listAdminOrders(),
     listInventoryImportRuns(),
     listAdminDiscountCodes(),
     listAdminApiTokens(),
+    listAdminProducts(),
   ]);
 
   return (
@@ -46,6 +48,7 @@ export default async function AdminPage() {
       initialImports={imports}
       initialDiscounts={discounts}
       initialApiTokens={apiTokens}
+      initialProducts={products}
       isDatabaseBacked={isStoreDatabaseEnabled()}
     />
   );

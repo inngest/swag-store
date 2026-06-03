@@ -5,6 +5,8 @@ const isAdminRoute = createRouteMatcher(['/admin(.*)']);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isAdminRoute(req)) {
+    if (isAdminE2eBypassEnabled()) return;
+
     const { isAuthenticated, redirectToSignIn } = await auth();
     if (!isAuthenticated) {
       if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
@@ -14,6 +16,13 @@ export default clerkMiddleware(async (auth, req) => {
     }
   }
 });
+
+function isAdminE2eBypassEnabled(): boolean {
+  if (process.env.ADMIN_E2E_BYPASS !== '1') return false;
+  if (process.env.NODE_ENV === 'production') return false;
+  const email = (process.env.ADMIN_E2E_EMAIL ?? '').trim().toLowerCase();
+  return email.endsWith('@inngest.com');
+}
 
 export const config = {
   matcher: [

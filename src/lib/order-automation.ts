@@ -5,6 +5,7 @@ import { getStripe } from './stripe';
 import { ensureStripeCouponForDiscount } from './stripe-discounts';
 import {
   listPublicProducts,
+  recordDiscountRedemption,
   validateCartAvailability,
   validateDiscountCode,
   type AdminDiscountCode,
@@ -29,6 +30,13 @@ export type AutomatedOrderInput = {
   };
 };
 
+export type EventSwagOrderInput = Omit<AutomatedOrderInput, 'discountCode'> & {
+  eventName: string;
+  eventDate?: string;
+  recipient?: string;
+  purpose?: string;
+};
+
 export type AutomatedOrderResult =
   | {
       status: 'submitted';
@@ -46,6 +54,40 @@ export type AutomatedOrderResult =
       discountCode: string;
       discountAmountCents: number;
     };
+
+export type AutomatedOrderPreview = {
+  status: 'ready_for_direct_submit' | 'needs_customer_shipping' | 'payment_required';
+  subtotalCents: number;
+  discountCode: string;
+  discountAmountCents: number;
+  totalCents: number;
+  missingFields: string[];
+  items: Array<{
+    productId: string;
+    productName: string;
+    sku: string;
+    variantId: string;
+    size: string;
+    color: string;
+    quantity: number;
+    unitAmountCents: number;
+    amountTotalCents: number;
+  }>;
+  nextAction: string;
+};
+
+export type EventSwagOrderPreview = Omit<AutomatedOrderPreview, 'discountCode' | 'nextAction'> & {
+  eventName: string;
+  eventDate: string;
+  recipient: string;
+  discountCode: '';
+  nextAction: string;
+};
+
+export type EventSwagOrderResult = {
+  discountCode: AdminDiscountCode;
+  order: AutomatedOrderResult;
+};
 
 export async function generateSwagCodeForActor(input: {
   actorEmail: string;
@@ -71,6 +113,112 @@ export async function listAutomationProducts() {
       stock: variant.stock,
     })),
   }));
+}
+
+export async function previewAutomatedOrder(input: AutomatedOrderInput): Promise<AutomatedOrderPreview> {
+  const prepared = await prepareCheckout(input.items, input.discountCode);
+  const discountCode = prepared.appliedDiscount?.code ?? '';
+  const discountAmountCents = prepared.appliedDiscount?.discountCents ?? 0;
+  const totalCents = Math.max(0, prepared.subtotalCents - discountAmountCents);
+  const missingFields = totalCents === 0 ? missingDirectOrderFields(input) : [];
+  const status = totalCents > 0
+    ? 'payment_required'
+    : missingFields.length
+      ? 'needs_customer_shipping'
+      : 'ready_for_direct_submit';
+
+  return {
+    status,
+    subtotalCents: prepared.subtotalCents,
+    discountCode,
+    discountAmountCents,
+    totalCents,
+    missingFields,
+    items: prepared.lineItemsForEvent.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      sku: item.sku,
+      variantId: item.variantId,
+      size: item.size ?? '',
+      color: item.color ?? '',
+      quantity: item.quantity,
+      unitAmountCents: Math.round(item.amountTotal / item.quantity),
+      amountTotalCents: item.amountTotal,
+    })),
+    nextAction: orderPreviewNextAction(status),
+  };
+}
+
+export async function previewEventSwagOrder({
+  input,
+  actorEmail,
+}: {
+  input: EventSwagOrderInput;
+  actorEmail: string;
+}): Promise<EventSwagOrderPreview> {
+  const eventName = normalizeEventName(input.eventName);
+  const prepared = await prepareCheckout(input.items);
+  const missingFields = missingDirectOrderFields(input);
+  const status = missingFields.length ? 'needs_customer_shipping' : 'ready_for_direct_submit';
+
+  return {
+    status,
+    eventName,
+    eventDate: input.eventDate?.trim() ?? '',
+    recipient: input.recipient?.trim() || actorEmail,
+    subtotalCents: prepared.subtotalCents,
+    discountCode: '',
+    discountAmountCents: prepared.subtotalCents,
+    totalCents: 0,
+    missingFields,
+    items: prepared.lineItemsForEvent.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      sku: item.sku,
+      variantId: item.variantId,
+      size: item.size ?? '',
+      color: item.color ?? '',
+      quantity: item.quantity,
+      unitAmountCents: Math.round(item.amountTotal / item.quantity),
+      amountTotalCents: item.amountTotal,
+    })),
+    nextAction: missingFields.length
+      ? 'Collect the missing customer and shipping fields before calling create_event_order.'
+      : 'Call create_event_order after the user confirms the event swag order details.',
+  };
+}
+
+export async function createEventSwagOrder({
+  input,
+  actorEmail,
+  origin,
+}: {
+  input: EventSwagOrderInput;
+  actorEmail: string;
+  origin: string;
+}): Promise<EventSwagOrderResult> {
+  const eventName = normalizeEventName(input.eventName);
+  const purpose = [
+    'Event swag order',
+    eventName,
+    input.eventDate?.trim() && `on ${input.eventDate.trim()}`,
+    input.purpose?.trim(),
+  ].filter(Boolean).join(' - ');
+  const discountCode = await generateSwagCodeForActor({
+    actorEmail,
+    kind: 'devrel_comp',
+    recipient: input.recipient?.trim() || actorEmail,
+    purpose,
+  });
+  const order = await submitAutomatedOrder({
+    input: {
+      ...input,
+      discountCode: discountCode.code,
+    },
+    origin,
+  });
+
+  return { discountCode, order };
 }
 
 export async function submitAutomatedOrder({
@@ -108,8 +256,18 @@ export async function submitAutomatedOrder({
   const customerEmail = input.customer?.email?.trim();
   const customerName = input.customer?.name?.trim() || input.shipping?.name?.trim();
   const shipping = input.shipping;
-  if (!customerEmail || !customerName || !shipping?.line1 || !shipping.city || !shipping.state || !shipping.postalCode) {
+  if (missingDirectOrderFields(input).length || !shipping) {
     throw new Error('Direct API order submission requires customer email, customer/shipping name, and a full shipping address.');
+  }
+
+  const stripeSessionId = `api_${orderId}`;
+  if (prepared.appliedDiscount) {
+    await recordDiscountRedemption({
+      code: prepared.appliedDiscount.code,
+      orderId,
+      stripeSessionId,
+      amountCents: prepared.appliedDiscount.discountCents,
+    });
   }
 
   await inngest.send({
@@ -117,7 +275,7 @@ export async function submitAutomatedOrder({
     name: 'store/order.placed',
     data: {
       orderId,
-      stripeSessionId: `api_${orderId}`,
+      stripeSessionId,
       encrypted: {
         customerEmail,
         customerName,
@@ -179,6 +337,40 @@ export async function createCheckoutSessionForCart({
   });
 
   return { url: session.url, orderId };
+}
+
+function missingDirectOrderFields(input: AutomatedOrderInput): string[] {
+  const customerEmail = input.customer?.email?.trim();
+  const customerName = input.customer?.name?.trim() || input.shipping?.name?.trim();
+  const shipping = input.shipping;
+  const missing: string[] = [];
+
+  if (!customerEmail) missing.push('customer.email');
+  if (!customerName) missing.push('customer.name or shipping.name');
+  if (!shipping?.line1?.trim()) missing.push('shipping.line1');
+  if (!shipping?.city?.trim()) missing.push('shipping.city');
+  if (!shipping?.state?.trim()) missing.push('shipping.state');
+  if (!shipping?.postalCode?.trim()) missing.push('shipping.postalCode');
+
+  return missing;
+}
+
+function orderPreviewNextAction(status: AutomatedOrderPreview['status']): string {
+  if (status === 'payment_required') {
+    return 'Call submit_order only after the user approves a Stripe Checkout session; then return checkoutUrl to the user.';
+  }
+
+  if (status === 'needs_customer_shipping') {
+    return 'Collect the missing customer and shipping fields before calling submit_order.';
+  }
+
+  return 'Call submit_order after the user confirms the zero-dollar order details.';
+}
+
+function normalizeEventName(eventName: string): string {
+  const normalized = eventName.trim();
+  if (!normalized) throw new Error('eventName is required for event swag orders.');
+  return normalized;
 }
 
 async function prepareCheckout(items: CheckoutCartItem[], discountCode?: string) {

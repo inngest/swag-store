@@ -43,7 +43,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <div style={{ padding: '40px 40px 32px', display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div>
             <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
-              {String(productIndex + 1).padStart(2, '0')} / 04 · {product.type.toUpperCase()}
+              {String(productIndex + 1).padStart(2, '0')} / {String(products.length).padStart(2, '0')} · {product.type.toUpperCase()}
             </div>
             <h1 className="display" style={{ fontSize: 'clamp(56px, 6.5vw, 96px)', lineHeight: 0.92, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
               {product.name}
@@ -101,13 +101,13 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       </div>
 
       <section>
-        <SectionHead num="2.5" title="ALSO IN STOCK" blurb="Pair the tee with the hoodie. Add the hat to your kit. Stickers go on the laptop." />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', borderBottom: '1px solid var(--ink)' }}>
+        <SectionHead num="2.5" title="ALSO IN STOCK" blurb="The rest of the orderable office swag inventory." />
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, Math.min(3, others.length))}, 1fr)`, borderBottom: '1px solid var(--ink)' }}>
           {others.map((p, i) => (
             <Link
               key={p.id}
               href={`/products/${p.slug}`}
-              style={{ aspectRatio: '1/1.1', borderRight: i < 2 ? '1px solid var(--ink)' : 'none', cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column' }}
+              style={{ aspectRatio: '1/1.1', borderRight: i < others.length - 1 ? '1px solid var(--ink)' : 'none', cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column' }}
             >
               <div style={{ flex: 1, position: 'relative' }}>
                 <ProductCover product={p} />

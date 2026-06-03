@@ -23,7 +23,10 @@ function apiError(err: unknown) {
     ? 401
     : message.includes('requires customer')
       ? 400
-      : message.includes('not found') || message.includes('Invalid') || message.includes('cart is empty')
+      : message.includes('not found') ||
+          message.includes('Invalid') ||
+          message.includes('cart is empty') ||
+          message.includes('already been redeemed')
         ? 400
         : 500;
   return NextResponse.json({ error: message }, { status });

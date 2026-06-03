@@ -23,6 +23,11 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Checkout failed';
     console.error('[checkout] error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status = message.includes('Discount code') ||
+      message.includes('cart is empty') ||
+      message.includes('Product variant')
+      ? 400
+      : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

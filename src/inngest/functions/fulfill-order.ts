@@ -161,6 +161,17 @@ export const fulfillOrder = inngest.createFunction(
     }
     await emit('reserve-inventory', 'complete', inventory);
 
+    await step.sendEvent('check-low-stock-after-reserve', {
+      id: `inventory-changed-order-${orderId}`,
+      name: 'store/inventory.changed',
+      data: {
+        source: 'order-fulfillment',
+        reason: 'Inventory reserved for order fulfillment',
+        orderId,
+        reservations: inventory.reservations,
+      },
+    });
+
     await emit('send-confirmation', 'running');
     const confirmation = await step.run('send-confirmation', async () => {
       return {

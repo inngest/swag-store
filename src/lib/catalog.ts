@@ -3,7 +3,8 @@
 // In production, this would come from a CMS or database.
 // For the livestream, it's intentionally a flat JSON stub.
 
-export type ProductSize = 'XS' | 'S' | 'M' | 'L' | 'XL' | 'XXL';
+export type ProductSize = 'XS' | 'S' | 'M' | 'L' | 'XL' | 'XXL' | 'XXXL';
+export const PRODUCT_SIZE_ORDER: ProductSize[] = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 export type ProductColor = {
   name: string;
   hex: string;
@@ -84,19 +85,22 @@ export const FULFILLMENT_STEPS: WorkflowStep[] = [
 ];
 
 // ─── Product catalog ────────────────────────────────────────────────────────
+// Seeded from the Notion "Swag Inventory" page on 2026-05-28.
+// The Notion page also has event inventory marked "do not touch"; that stock is
+// intentionally excluded from the orderable catalog.
 export const PRODUCTS: Product[] = [
   {
-    id: 'prod_durably-yours-tee',
-    slug: 'durably-yours-tee',
-    name: 'Durably Yours',
+    id: 'prod_anti-anti-infra-tee',
+    slug: 'anti-anti-infra-tee',
+    name: 'Anti Anti Infra Co.',
     type: 'T-Shirt',
-    sku: 'INN-TEE-01',
-    tagline: 'The T-shirt that never drops a step.',
-    blurb: 'Heavyweight cotton tee. Front: Inngest mark. Back: workflow diagram printed in Citrus Glow.',
+    sku: 'INN-AAI-TEE',
+    tagline: 'Office stock for customers, community, and prospects.',
+    blurb: 'Anti Anti Infra Co. tee. Live inventory is backed by Railway Postgres and decremented by Inngest.',
     description:
-      'A 6.1 oz combed cotton tee, garment-dyed for that lived-in feel after the first wash. The back print is a real Inngest workflow — not decorative, not invented — captured from a production run on Apr 12. Made in Los Angeles.',
-    fabric: '100% combed cotton, 6.1oz',
-    fit: 'Boxy, true to size',
+      'The Anti Anti Infra Co. T-shirt from the office swag shelf. Available sizes are synced from the current Swag Inventory page and reserved by the fulfillment workflow when an order is placed.',
+    fabric: 'Cotton jersey',
+    fit: 'Unisex, true to size',
     cornerTag: '01 / TEE',
     cover: 'dark',
     price: 2800,
@@ -106,100 +110,44 @@ export const PRODUCTS: Product[] = [
     colors: [
       { name: 'grey', hex: '#B8B5AE', label: 'Heather Grey' },
     ],
-    sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+    sizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
     variants: [
-      { id: 'var_tee-grey-xs', size: 'XS', color: 'grey', stock: 8 },
-      { id: 'var_tee-grey-s', size: 'S', color: 'grey', stock: 12 },
-      { id: 'var_tee-grey-m', size: 'M', color: 'grey', stock: 24 },
-      { id: 'var_tee-grey-l', size: 'L', color: 'grey', stock: 18 },
-      { id: 'var_tee-grey-xl', size: 'XL', color: 'grey', stock: 10 },
-      { id: 'var_tee-grey-xxl', size: 'XXL', color: 'grey', stock: 6 },
+      { id: 'var_aai-tee-grey-s', size: 'S', color: 'grey', stock: 20 },
+      { id: 'var_aai-tee-grey-m', size: 'M', color: 'grey', stock: 24 },
+      { id: 'var_aai-tee-grey-l', size: 'L', color: 'grey', stock: 21 },
+      { id: 'var_aai-tee-grey-xl', size: 'XL', color: 'grey', stock: 23 },
+      { id: 'var_aai-tee-grey-xxl', size: 'XXL', color: 'grey', stock: 11 },
+      { id: 'var_aai-tee-grey-xxxl', size: 'XXXL', color: 'grey', stock: 7 },
     ],
     featured: true,
-    tags: ['bestseller', 'new'],
+    tags: ['office-stock', 'notion-seeded'],
   },
   {
-    id: 'prod_inngest-hoodie',
-    slug: 'inngest-hoodie',
-    name: 'Inngest Hoodie',
-    type: 'Hoodie',
-    sku: 'INN-HOOD-01',
-    tagline: 'Citrus Glow on Quantum. Retry-proof warmth.',
-    blurb: 'Heavyweight 14oz fleece. Embroidered mark, screen-printed mono lockup at hem.',
+    id: 'prod_step-run-socks',
+    slug: 'step-run-socks',
+    name: 'Step.run Socks',
+    type: 'Socks',
+    sku: 'INN-STEP-SOCKS',
+    tagline: 'Step.run, but make it wearable.',
+    blurb: 'One-size Step.run socks from the office inventory shelf.',
     description:
-      'A 14 oz brushed-back fleece hoodie with embroidered chest mark and a mono-spaced step.run() lockup printed along the hem. Heavy enough to feel like outerwear; soft enough to live in. Pre-shrunk.',
-    fabric: '80% cotton / 20% poly fleece, 14oz',
-    fit: 'Relaxed, size up for oversized',
-    cornerTag: '02 / HOOD',
+      'Step.run socks for customers, community, and prospects. This stock count comes from the current Swag Inventory page and is reserved through the same Railway-backed fulfillment flow.',
+    fabric: 'Cotton blend knit',
+    fit: 'One size',
+    cornerTag: '02 / SOCK',
     cover: 'citrus',
-    price: 5800,
-    category: 'apparel',
-    image: '/products/hoodie-orange.png',
+    price: 1200,
+    category: 'accessories',
+    image: '/products/stickers-cream.png',
     imagePlaceholder: 'linear-gradient(135deg, #FF7300 0%, #362C40 60%, #1A161C 100%)',
     colors: [
       { name: 'citrus', hex: '#FF7300', label: 'Citrus Glow' },
     ],
-    sizes: ['S', 'M', 'L', 'XL', 'XXL'],
     variants: [
-      { id: 'var_hoodie-s', size: 'S', color: 'citrus', stock: 6 },
-      { id: 'var_hoodie-m', size: 'M', color: 'citrus', stock: 14 },
-      { id: 'var_hoodie-l', size: 'L', color: 'citrus', stock: 11 },
-      { id: 'var_hoodie-xl', size: 'XL', color: 'citrus', stock: 8 },
-      { id: 'var_hoodie-xxl', size: 'XXL', color: 'citrus', stock: 4 },
+      { id: 'var_step-socks-one', color: 'citrus', stock: 58 },
     ],
     featured: true,
-    tags: ['featured'],
-  },
-  {
-    id: 'prod_step-function-sticker-pack',
-    slug: 'step-function-sticker-pack',
-    name: 'Step Function',
-    type: 'Sticker Pack',
-    sku: 'INN-STK-01',
-    tagline: '8 stickers. 0 dropped steps.',
-    blurb: 'Eight die-cut vinyl stickers. Logos, marks, and one easter egg.',
-    description:
-      'Eight matte-vinyl die-cut stickers, weatherproof and dishwasher-safe. Includes the wordmark, the M-mark in three colorways, two workflow glyphs, a step.run() bumper, and one secret design we will not describe here.',
-    fabric: 'Matte vinyl, 3M adhesive',
-    fit: '8 stickers, ~3in each',
-    cornerTag: '03 / STK',
-    cover: 'light',
-    price: 1200,
-    category: 'accessories',
-    image: '/products/stickers-cream.png',
-    imagePlaceholder: 'linear-gradient(135deg, #FF7300 0%, #CBB26A 50%, #EEECE6 100%)',
-    variants: [
-      { id: 'var_stickers-one', stock: 150 },
-    ],
-    featured: false,
-    tags: ['new', 'popular'],
-  },
-  {
-    id: 'prod_inngest-hat',
-    slug: 'inngest-hat',
-    name: 'Inngest Hat',
-    type: 'Hat',
-    sku: 'INN-HAT-01',
-    tagline: 'Eon Moss. Embroidered mark.',
-    blurb: 'Six-panel structured cap. Embroidered mark, low-profile fit.',
-    description:
-      'Six-panel structured cap in Eon Moss. Embroidered Inngest mark on the front panel, brass slide-buckle adjustable strap, low-profile crown. The hat for the engineer who keeps the build green.',
-    fabric: '100% washed cotton twill',
-    fit: 'One size, adjustable',
-    cornerTag: '04 / HAT',
-    cover: 'light',
-    price: 2400,
-    category: 'accessories',
-    image: '/products/hat-moss.png',
-    imagePlaceholder: 'linear-gradient(135deg, #006250 0%, #1A161C 100%)',
-    colors: [
-      { name: 'eon-moss', hex: '#006250', label: 'Eon Moss' },
-    ],
-    variants: [
-      { id: 'var_hat-one', color: 'eon-moss', stock: 60 },
-    ],
-    featured: false,
-    tags: ['limited'],
+    tags: ['office-stock', 'notion-seeded'],
   },
 ];
 

@@ -182,7 +182,6 @@ export function CheckoutClient({ products }: { products: Product[] }) {
                     void applyDiscount();
                   }
                 }}
-                placeholder="DEVREL100"
                 disabled={stage !== 'review'}
                 className="mono"
                 style={{

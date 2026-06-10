@@ -24,7 +24,9 @@ export async function ensureStripeCouponForDiscount(discount: AppliedDiscount): 
     id: couponId,
     duration: 'once',
     max_redemptions: 1,
-    name: discount.label || discount.code,
+    // Stripe caps coupon names at 40 characters; long labels (e.g. with an
+    // email) must be truncated or coupon creation rejects the checkout.
+    name: (discount.label || discount.code).slice(0, 40),
     metadata: {
       source: 'swag-store',
       discountCode: discount.code,

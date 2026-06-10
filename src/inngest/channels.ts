@@ -12,6 +12,13 @@ export const orderChannel = channel({
         ts: z.number(),
       }),
     },
+    status: {
+      schema: z.object({
+        status: z.enum(['pending', 'fulfilled', 'shipped']),
+        tracking: z.string().optional(),
+        ts: z.number(),
+      }),
+    },
   },
 });
 

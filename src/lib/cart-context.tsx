@@ -1,7 +1,30 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
 import { CartItem } from './catalog';
+
+const CART_STORAGE_KEY = 'swag-store-cart';
+
+function loadStoredItems(): CartItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(CART_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (i): i is CartItem =>
+        i != null &&
+        typeof i === 'object' &&
+        typeof i.productId === 'string' &&
+        typeof i.variantId === 'string' &&
+        typeof i.quantity === 'number' &&
+        i.quantity > 0
+    );
+  } catch {
+    return [];
+  }
+}
 
 // ─── Cart State ─────────────────────────────────────────────────────────────
 
@@ -11,6 +34,7 @@ type CartState = {
 };
 
 type CartAction =
+  | { type: 'HYDRATE'; items: CartItem[] }
   | { type: 'ADD_ITEM'; item: CartItem }
   | { type: 'REMOVE_ITEM'; variantId: string }
   | { type: 'UPDATE_QUANTITY'; variantId: string; quantity: number }
@@ -32,6 +56,8 @@ type CartContextValue = {
 
 function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
+    case 'HYDRATE':
+      return { ...state, items: action.items };
     case 'ADD_ITEM': {
       const existing = state.items.find((i) => i.variantId === action.item.variantId);
       if (existing) {
@@ -84,6 +110,25 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(cartReducer, { items: [], isOpen: false });
+  const hydrated = useRef(false);
+
+  // Hydrate items from localStorage on mount (client only; isOpen stays ephemeral)
+  useEffect(() => {
+    dispatch({ type: 'HYDRATE', items: loadStoredItems() });
+  }, []);
+
+  // Persist items on every cart mutation (skip the initial pre-hydration render)
+  useEffect(() => {
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    try {
+      window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(state.items));
+    } catch {
+      // Storage unavailable (private mode, quota) — cart stays in-memory
+    }
+  }, [state.items]);
 
   const addItem = useCallback((item: CartItem) => dispatch({ type: 'ADD_ITEM', item }), []);
   const removeItem = useCallback((variantId: string) => dispatch({ type: 'REMOVE_ITEM', variantId }), []);

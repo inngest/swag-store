@@ -7,7 +7,9 @@ import { requireAdmin } from '@/lib/admin-auth';
 import { runSwagCodeAgent, type SwagCodeAgentKind } from '@/lib/discount-code-agent';
 import { normalizeProductInput, type ProductUpsertInput } from '@/lib/product-management';
 import {
+  applyInventoryAdjustment,
   generateApiToken,
+  isOrderStatus,
   isStoreDatabaseEnabled,
   listAdminApiTokens,
   listAdminDiscountCodes,
@@ -18,6 +20,7 @@ import {
   revokeApiToken,
   updateDiscountCodeActive,
   updateInventoryVariant,
+  updateApiToken,
   upsertAdminProduct,
   upsertDiscountCode,
   type DiscountCodeType,
@@ -59,7 +62,24 @@ export async function updateInventoryAction(input: {
 }) {
   const admin = await requireAdmin();
   requireDatabaseForMutation();
-  await updateInventoryVariant(input);
+  const inventory = await listAdminInventory();
+  const current = inventory.find((row) => row.variantId === input.variantId);
+  if (!current) throw new Error(`Variant not found: ${input.variantId}`);
+
+  const newStock = Math.max(0, Math.floor(input.stock));
+  const quantityChange = newStock - current.stock;
+  if (quantityChange !== 0) {
+    await applyInventoryAdjustment({
+      actorEmail: admin.email,
+      mode: 'manual_correction',
+      source: 'admin-inventory-edit',
+      reason: 'Admin manually updated inventory',
+      items: [{ variantId: input.variantId, quantity: quantityChange }],
+    });
+  }
+  if (input.image !== undefined || quantityChange === 0) {
+    await updateInventoryVariant({ variantId: input.variantId, stock: newStock, image: input.image });
+  }
   await inngest.send({
     id: `inventory-changed-admin-${input.variantId}-${Date.now()}`,
     name: 'store/inventory.changed',
@@ -94,6 +114,9 @@ export async function upsertProductAction(input: ProductUpsertInput) {
 export async function requestInventoryImportAction() {
   const admin = await requireAdmin();
   requireDatabaseForMutation();
+  if (!process.env.INVENTORY_SHEET_ID && !process.env.ORDERS_SHEET_ID) {
+    throw new Error('INVENTORY_SHEET_ID or ORDERS_SHEET_ID is required for sheet imports.');
+  }
   await inngest.send({
     id: `inventory-import-${Date.now()}`,
     name: 'admin/inventory.import.requested',
@@ -111,6 +134,9 @@ export async function updateOrderStatusAction(input: {
 }) {
   const admin = await requireAdmin();
   requireDatabaseForMutation();
+  if (!isOrderStatus(input.status)) {
+    throw new Error(`Invalid order status: ${String(input.status)}`);
+  }
   await inngest.send({
     id: `order-status-${input.orderId}-${input.status}-${Date.now()}`,
     name: 'admin/order.status_update.requested',
@@ -165,6 +191,16 @@ export async function generateApiTokenAction(input: {
     actorEmail: input.actorEmail || admin.email,
     createdBy: admin.email,
   });
+}
+
+export async function updateApiTokenAction(input: {
+  id: number;
+  name: string;
+  actorEmail: string;
+}) {
+  await requireAdmin();
+  requireDatabaseForMutation();
+  await updateApiToken(input);
 }
 
 export async function revokeApiTokenAction(input: { id: number }) {

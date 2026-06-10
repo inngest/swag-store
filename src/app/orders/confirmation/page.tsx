@@ -5,12 +5,23 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { unlockOrderViewing } from '@/app/orders/[orderId]/actions';
+import { useCart } from '@/lib/cart-context';
 
 function ConfirmationContent() {
   const params = useSearchParams();
   const orderId = params.get('ord') ?? 'ord_demo01';
   const sessionId = params.get('session_id');
   const [email, setEmail] = React.useState<string | null>(null);
+  const { clearCart } = useCart();
+
+  React.useEffect(() => {
+    // Arriving from a completed Stripe checkout — the purchase emptied the
+    // real cart, so the persisted copy must go too.
+    if (sessionId) clearCart();
+  }, [sessionId, clearCart]);
+  const monthYear = new Date()
+    .toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    .toUpperCase();
 
   React.useEffect(() => {
     if (!sessionId) return;
@@ -37,7 +48,7 @@ function ConfirmationContent() {
     <div>
       <div style={{ padding: '80px 32px 40px', textAlign: 'center', borderBottom: '1px solid var(--ink)', background: 'var(--citrus)', color: 'var(--nebula)', position: 'relative', overflow: 'hidden' }}>
         <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>
-          06 / ORDER CONFIRMED · APR 2026
+          06 / ORDER CONFIRMED · {monthYear}
         </div>
         <h1 className="display" style={{ fontSize: 'clamp(72px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0 }}>
           Thanks.

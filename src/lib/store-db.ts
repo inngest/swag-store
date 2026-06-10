@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { PRODUCTS, PRODUCT_SIZE_ORDER, type Product, type ProductColor, type ProductSize } from './catalog';
+import { CheckoutInputError } from './checkout-errors';
 import { getPool, hasDatabaseUrl } from './db';
 import type { OrderDetail, OrderRow } from './sheets';
 import {
@@ -9,8 +10,13 @@ import {
   fetchPublicOrders as fetchSheetPublicOrders,
 } from './sheets';
 
-export type OrderStatus = 'pending' | 'fulfilled' | 'shipped';
+export const ORDER_STATUSES = ['pending', 'fulfilled', 'shipped'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export type DiscountCodeType = 'amount_off' | 'percent_off';
+
+export function isOrderStatus(value: unknown): value is OrderStatus {
+  return ORDER_STATUSES.includes(value as OrderStatus);
+}
 
 export type StoreLineItem = {
   description: string | null;
@@ -266,6 +272,10 @@ async function ensureStoreSchema(): Promise<void> {
 
     alter table orders add column if not exists discount_code text not null default '';
     alter table orders add column if not exists discount_amount_cents integer not null default 0;
+
+    update orders set status = 'pending' where status not in ('pending', 'fulfilled', 'shipped');
+    alter table orders drop constraint if exists orders_status_check;
+    alter table orders add constraint orders_status_check check (status in ('pending', 'fulfilled', 'shipped'));
 
     create table if not exists order_items (
       id bigserial primary key,
@@ -824,10 +834,10 @@ export async function validateCartAvailability(
       [item.variantId, item.productId],
     );
     const row = res.rows[0];
-    if (!row) throw new Error(`Product variant not found: ${item.variantId}`);
+    if (!row) throw new CheckoutInputError(`Product variant not found: ${item.variantId}`);
     const stock = Number(row.stock ?? 0);
     if (stock < item.quantity) {
-      throw new Error(`${row.name} has only ${stock} left in stock.`);
+      throw new CheckoutInputError(`${row.name} has only ${stock} left in stock.`);
     }
   }
 }
@@ -1007,6 +1017,9 @@ export async function updateOrderStatus({
   tracking?: string;
   notes?: string;
 }): Promise<void> {
+  if (!isOrderStatus(status)) {
+    throw new Error(`Invalid order status: ${String(status)}`);
+  }
   requireStoreDatabase();
   await ensureStoreReady();
   const res = await getPool().query(
@@ -1392,6 +1405,38 @@ export async function generateApiToken({
     token,
     apiToken: rowToAdminApiToken(res.rows[0]),
   };
+}
+
+export async function updateApiToken({
+  id,
+  name,
+  actorEmail,
+}: {
+  id: number;
+  name: string;
+  actorEmail: string;
+}): Promise<void> {
+  requireStoreDatabase();
+  await ensureStoreReady();
+
+  const cleanId = Math.floor(Number(id));
+  if (!Number.isSafeInteger(cleanId) || cleanId <= 0) throw new Error('API token id is required.');
+
+  const cleanName = String(name ?? '').trim();
+  if (!cleanName) throw new Error('API token name is required.');
+
+  const cleanActorEmail = String(actorEmail ?? '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanActorEmail)) {
+    throw new Error('API token actor email is required.');
+  }
+
+  const res = await getPool().query(
+    `update api_tokens
+     set name = $1, actor_email = $2
+     where id = $3 and active = true`,
+    [cleanName, cleanActorEmail, cleanId],
+  );
+  if (res.rowCount === 0) throw new Error('API token not found or already revoked.');
 }
 
 export async function revokeApiToken(id: number): Promise<void> {

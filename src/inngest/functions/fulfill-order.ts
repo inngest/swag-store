@@ -1,7 +1,16 @@
+import { isEncryptedValue } from '@inngest/middleware-encryption';
+import { LibSodiumEncryptionService } from '@inngest/middleware-encryption/strategies/libSodium';
 import { inngest } from '../client';
 import { orderChannel, adminChannel } from '../channels';
 import { getStripe } from '@/lib/stripe';
-import { recordDiscountRedemption, recordPendingOrder, reserveInventory } from '@/lib/store-db';
+import { sendOrderFulfillmentFailureSlackMessage } from '@/lib/slack';
+import {
+  isStoreDatabaseEnabled,
+  recordDiscountRedemption,
+  recordPendingOrder,
+  reserveInventory,
+  updateOrderStatus,
+} from '@/lib/store-db';
 
 type LineItem = {
   description: string | null;
@@ -26,32 +35,151 @@ type ShippingInfo = {
   country?: string | null;
 } | null;
 
+type EncryptedPii = {
+  customerEmail?: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  shipping?: ShippingInfo;
+};
+
+type OrderPlacedData = {
+  orderId: string;
+  stripePaymentIntentId?: string;
+  encrypted?: EncryptedPii;
+  lineItems: LineItem[];
+  amountTotal: number;
+  currency: string;
+  stripeSessionId?: string;
+  discount?: {
+    code: string;
+    amountCents: number;
+  } | null;
+};
+
 export const fulfillOrder = inngest.createFunction(
   {
     id: 'fulfill-order',
     name: 'Fulfill Order',
     retries: 3,
     triggers: [{ event: 'store/order.placed' }],
+    // Safety net: the customer has (usually) already been charged by the time
+    // this function runs, so a permanently failed run must never silently drop
+    // the order. Park it in the pending queue, refund the payment, and alert.
+    onFailure: async ({ event, error, step }) => {
+      const original = event.data.event;
+      const data = original.data as OrderPlacedData;
+      const { orderId, stripePaymentIntentId, lineItems, amountTotal, currency } = data;
+      const failureReason = errorMessage(error);
+
+      // The encryption middleware only decrypts the top-level failure event, so
+      // the original event's PII may still be an encrypted blob here. Decrypt it
+      // inline (never into step state) and degrade gracefully if we can't.
+      const pii = await decryptPii(data.encrypted);
+      const shipping = pii?.shipping ?? null;
+
+      const itemsLabel = (lineItems ?? [])
+        .map((li) => {
+          const name = li.productName ?? li.description ?? 'item';
+          const variant = [li.size, li.color].filter(Boolean).join('/');
+          const variantTag = variant ? ` (${variant})` : '';
+          const quantity = li.quantity ?? 1;
+          const qtyTag = quantity > 1 ? ` × ${quantity}` : '';
+          return `${name}${variantTag}${qtyTag}`;
+        })
+        .join(', ');
+
+      const needsAttentionNote = `NEEDS ATTENTION: fulfillment failed after retries — ${failureReason}. Inventory NOT reserved; review before shipping.`;
+
+      await step.run('record-failed-order', async () => {
+        return recordPendingOrder({
+          row: {
+            orderId,
+            createdAt: new Date().toISOString(),
+            email: pii?.customerEmail ?? '',
+            name: pii?.customerName ?? '',
+            items: itemsLabel,
+            totalCents: amountTotal,
+            currency: (currency ?? 'usd').toUpperCase(),
+            shipAddress: [shipping?.line1, shipping?.line2].filter(Boolean).join(', '),
+            shipCity: shipping?.city ?? '',
+            shipState: shipping?.state ?? '',
+            shipZip: shipping?.postalCode ?? '',
+            shipCountry: shipping?.country ?? '',
+            phone: pii?.customerPhone ?? '',
+            status: 'pending',
+            tracking: '',
+            notes: needsAttentionNote,
+            discountCode: data.discount?.code ?? '',
+            discountAmountCents: data.discount?.amountCents ?? 0,
+          },
+          lineItems,
+          stripeSessionId: data.stripeSessionId,
+        });
+      });
+
+      const refund = await step.run('refund-payment', async () => {
+        if (!stripePaymentIntentId) {
+          return { refunded: false as const, reason: 'no payment intent on order' };
+        }
+        const stripe = getStripe();
+        const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+        if (pi.status !== 'succeeded') {
+          return { refunded: false as const, reason: `payment intent ${pi.id} status is ${pi.status}` };
+        }
+        const created = await stripe.refunds.create(
+          { payment_intent: stripePaymentIntentId },
+          { idempotencyKey: orderId },
+        );
+        return { refunded: true as const, refundId: created.id, amountCents: created.amount };
+      });
+
+      const refundSummary = refund.refunded
+        ? `Stripe refund ${refund.refundId} issued (${formatCents(refund.amountCents)}).`
+        : `No refund issued: ${refund.reason}.`;
+
+      if (refund.refunded && isStoreDatabaseEnabled()) {
+        await step.run('note-refund', async () => {
+          return updateOrderStatus({
+            orderId,
+            status: 'pending',
+            notes: `${needsAttentionNote} ${refundSummary}`,
+          });
+        });
+      }
+
+      await step.realtime.publish(
+        'publish-admin-fulfillment-failed',
+        adminChannel.order,
+        {
+          orderId,
+          customerEmail: pii?.customerEmail,
+          amount: amountTotal,
+          currency,
+          items: (lineItems ?? []).map((li) => ({
+            name: li.productName ?? li.description ?? 'item',
+            quantity: li.quantity ?? 1,
+          })),
+          step: 'fulfillment-failed',
+          status: 'failed',
+          ts: Date.now(),
+        },
+      );
+
+      await step.run('send-ops-alert', async () => {
+        return sendOrderFulfillmentFailureSlackMessage({
+          orderId,
+          reason: failureReason,
+          amountCents: amountTotal,
+          currency: currency ?? 'usd',
+          refundSummary,
+        });
+      });
+
+      return { orderId, recovered: true, refund, reason: failureReason };
+    },
   },
   async ({ event, step }) => {
-    const data = event.data as {
-      orderId: string;
-      stripePaymentIntentId?: string;
-      encrypted?: {
-        customerEmail?: string;
-        customerName?: string | null;
-        customerPhone?: string | null;
-        shipping?: ShippingInfo;
-      };
-      lineItems: LineItem[];
-      amountTotal: number;
-      currency: string;
-      stripeSessionId?: string;
-      discount?: {
-        code: string;
-        amountCents: number;
-      } | null;
-    };
+    const data = event.data as OrderPlacedData;
 
     const {
       orderId,
@@ -235,6 +363,25 @@ export const fulfillOrder = inngest.createFunction(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// The `inngest/function.failed` event nests the original event one level deep,
+// where the encryption middleware does not decrypt it. Mirror the middleware's
+// decryption here so the failure handler can read PII the same way the main
+// handler does. Returns undefined (instead of throwing) so the recovery path
+// never dies on a decryption problem.
+async function decryptPii(encrypted: unknown): Promise<EncryptedPii | undefined> {
+  if (!encrypted) return undefined;
+  if (!isEncryptedValue(encrypted)) return encrypted as EncryptedPii;
+  const key = process.env.INNGEST_ENCRYPTION_KEY;
+  if (!key) return undefined;
+  try {
+    const service = new LibSodiumEncryptionService(key);
+    return (await service.decrypt(encrypted.data)) as EncryptedPii;
+  } catch (err) {
+    console.error('[fulfill-order] failed to decrypt PII in failure handler:', errorMessage(err));
+    return undefined;
+  }
 }
 
 function formatCents(cents: number): string {

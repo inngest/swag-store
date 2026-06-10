@@ -1,6 +1,7 @@
+import { NonRetriableError } from 'inngest';
 import { inngest } from '../client';
-import { adminChannel } from '../channels';
-import { updateOrderStatus, type OrderStatus } from '@/lib/store-db';
+import { adminChannel, orderChannel } from '../channels';
+import { isOrderStatus, updateOrderStatus, type OrderStatus } from '@/lib/store-db';
 
 export const updateOrderStatusFunction = inngest.createFunction(
   {
@@ -18,6 +19,10 @@ export const updateOrderStatusFunction = inngest.createFunction(
       actorEmail?: string;
     };
 
+    if (!isOrderStatus(data.status)) {
+      throw new NonRetriableError(`Invalid order status: ${String(data.status)}`);
+    }
+
     await step.run('update-order-status', async () => {
       await updateOrderStatus({
         orderId: data.orderId,
@@ -33,6 +38,16 @@ export const updateOrderStatusFunction = inngest.createFunction(
       status: 'complete',
       ts: Date.now(),
     });
+
+    await step.realtime.publish(
+      'emit-order-status-update',
+      orderChannel(data.orderId).status,
+      {
+        status: data.status,
+        tracking: data.tracking,
+        ts: Date.now(),
+      },
+    );
 
     return {
       orderId: data.orderId,

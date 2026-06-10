@@ -11,12 +11,12 @@ import { getStripe } from '@/lib/stripe';
 export async function fetchOrderSubscriptionToken(orderId: string) {
   const token = await getSubscriptionToken(inngest, {
     channel: orderChannel(orderId),
-    topics: ['step'],
+    topics: ['step', 'status'],
   });
 
   return {
     channel: orderChannel(orderId).name as string,
-    topics: ['step'] as const,
+    topics: ['step', 'status'] as const,
     key: token.key,
     apiBaseUrl: token.apiBaseUrl,
   };

@@ -1,4 +1,5 @@
 import type { Product } from './catalog';
+import { CheckoutInputError } from './checkout-errors';
 
 export type CheckoutCartItem = {
   productId: string;
@@ -19,21 +20,21 @@ export function normalizeCheckoutItems(
   products: Product[],
 ): NormalizedCheckoutItem[] {
   if (!Array.isArray(items) || !items.length) {
-    throw new Error('cart is empty');
+    throw new CheckoutInputError('cart is empty');
   }
 
   return items.map((item) => {
     if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {
-      throw new Error('Invalid cart quantity.');
+      throw new CheckoutInputError('Invalid cart quantity.');
     }
 
     const product = products.find((candidate) => candidate.id === item.productId);
-    if (!product) throw new Error(`Product not found: ${item.productId}`);
+    if (!product) throw new CheckoutInputError(`Product not found: ${item.productId}`);
 
     const variant = product.variants.find((candidate) => candidate.id === item.variantId);
-    if (!variant) throw new Error(`Product variant not found: ${item.variantId}`);
+    if (!variant) throw new CheckoutInputError(`Product variant not found: ${item.variantId}`);
     if (variant.stock < item.quantity) {
-      throw new Error(`${product.name} has only ${variant.stock} left in stock.`);
+      throw new CheckoutInputError(`${product.name} has only ${variant.stock} left in stock.`);
     }
 
     return { product, variant, quantity: item.quantity };

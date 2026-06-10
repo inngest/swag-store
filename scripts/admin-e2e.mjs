@@ -21,6 +21,15 @@ const manualCode = `E2E${runId.replace(/[^A-Z0-9]/g, '').slice(-12)}`;
 const orderId = `e2e-order-${runId.toLowerCase()}`;
 const apiTokenName = `E2E API ${runId}`;
 const importSource = `E2E Import ${runId}`;
+const hasSheetImportConfig = Boolean(process.env.INVENTORY_SHEET_ID || process.env.ORDERS_SHEET_ID);
+const inventoryImportCsv = [
+  'item,S,M,L,XL,XXL,XXXL',
+  'Anti Anti Infra Co.,20,24,21,23,11,7',
+  'Step.run Socks,58,,,,,',
+  'Durable Workflow Hoodie,8,14,16,11,5,',
+  'Moss Ops Cap,42,,,,,',
+  'Workflow Sticker Pack,120,,,,,',
+].join('\n');
 const screenshots = [];
 const consoleErrors = [];
 const consoleWarnings = [];
@@ -29,6 +38,7 @@ const steps = [];
 let pool;
 let browser;
 let page;
+let catalogStockSnapshot = [];
 
 function loadDotEnv(path) {
   if (!existsSync(path)) return;
@@ -79,6 +89,23 @@ async function clickButton(name, exact = true) {
 async function tab(name, expected) {
   await clickButton(name);
   await expectVisible(page.getByText(expected, { exact: true }), `tab ${name} shows ${expected}`);
+}
+
+async function tabWithoutTestOrder(name) {
+  await clickButton(name);
+  await expectVisible(page.getByText('TRACKING', { exact: true }), `tab ${name} shows orders table`);
+  if ((await testOrderLink().count()) !== 0) {
+    throw new Error(`Test order ${orderId} should not appear in the ${name} queue.`);
+  }
+  note(`tab ${name} does not list test order`);
+}
+
+function testOrderLink() {
+  return page.getByRole('link', { name: orderId, exact: true });
+}
+
+function testOrderRow() {
+  return testOrderLink().locator('xpath=ancestor::div[contains(@style, "grid-template-columns")][1]');
 }
 
 function createSignInUrl() {
@@ -143,6 +170,36 @@ async function cleanupDb() {
     apiTokenName,
   ]);
   await pool.query("delete from inventory_import_runs where source like $1", [`%${runId}%`]);
+  await restoreCatalogStock();
+}
+
+async function snapshotCatalogStock() {
+  if (!pool) return;
+  const res = await pool.query('select id, stock from product_variants');
+  catalogStockSnapshot = res.rows.map((row) => ({
+    id: String(row.id),
+    stock: Number(row.stock ?? 0),
+  }));
+}
+
+async function restoreCatalogStock() {
+  if (!pool || catalogStockSnapshot.length === 0) return;
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    for (const row of catalogStockSnapshot) {
+      await client.query(
+        'update product_variants set stock = $1, updated_at = now() where id = $2',
+        [row.stock, row.id],
+      );
+    }
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function launchBrowser() {
@@ -166,15 +223,23 @@ async function testNavigationAndTopButtons() {
   await tab('Inventory', 'ITEM');
   await tab('Products', 'NEW PRODUCT');
   await tab('Pending', orderId);
-  await tab('Fulfilled', 'No orders in this queue.');
-  await tab('Shipped', 'No orders in this queue.');
+  await tabWithoutTestOrder('Fulfilled');
+  await tabWithoutTestOrder('Shipped');
   await tab('Discounts', 'SWAG CODE AGENT');
   await tab('API Tokens', 'MCP / AI ACCESS');
   await tab('Imports', 'LLM REVIEWED DOCUMENT IMPORT');
   await clickButton('REFRESH');
   await expectVisible(page.getByText(/ADMIN DASHBOARD/i), 'refresh completed');
-  await clickButton('IMPORT SHEET');
-  await expectVisible(page.getByText(/import requested|starting import|subscribed|realtime error/i), 'import sheet request surfaced status');
+  if (hasSheetImportConfig) {
+    await clickButton('IMPORT SHEET');
+    await expectVisible(page.getByText(/import requested|starting import|subscribed|realtime error/i), 'import sheet request surfaced status');
+  } else {
+    const importSheetButton = page.getByRole('button', { name: 'IMPORT SHEET', exact: true });
+    if (await importSheetButton.isEnabled()) {
+      throw new Error('IMPORT SHEET should be disabled when INVENTORY_SHEET_ID and ORDERS_SHEET_ID are missing.');
+    }
+    note('skipped sheet import: INVENTORY_SHEET_ID or ORDERS_SHEET_ID not configured');
+  }
 }
 
 async function testInventory() {
@@ -224,9 +289,7 @@ async function testProducts() {
 
 async function testOrders() {
   await tab('Pending', orderId);
-  const row = page.locator('div').filter({ hasText: orderId }).filter({
-    has: page.getByRole('button', { name: 'SAVE', exact: true }),
-  });
+  const row = testOrderRow();
   await row.locator('select').selectOption('fulfilled');
   await row.getByPlaceholder('Tracking').fill(`TRACK-${runId}`);
   await row.getByPlaceholder('Notes').fill(`E2E note ${runId}`);
@@ -281,11 +344,11 @@ async function testApiTokens() {
 async function testDocumentImport() {
   await tab('Imports', 'LLM REVIEWED DOCUMENT IMPORT');
   const filePath = join(tmpdir(), `swag-admin-${runId}.csv`);
-  writeFileSync(filePath, 'item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58,,,,,\n');
+  writeFileSync(filePath, `${inventoryImportCsv}\n`);
   await page.locator('input[type="file"]').setInputFiles(filePath);
   await page.getByPlaceholder('Swag inventory export').fill(importSource);
   await page.getByPlaceholder('item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58')
-    .fill('item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58');
+    .fill(inventoryImportCsv);
   await clickButton('IMPORT DOC');
   await expectVisible(page.getByText(/document import requested|uploading inventory document/i), 'document import requested');
 }
@@ -317,6 +380,7 @@ async function run() {
 
   try {
     await authenticate();
+    await snapshotCatalogStock();
     await testNavigationAndTopButtons();
     await testInventory();
     await testProducts();

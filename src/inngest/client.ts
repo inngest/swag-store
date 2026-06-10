@@ -6,6 +6,6 @@ const middleware = process.env.INNGEST_ENCRYPTION_KEY
   : [];
 
 export const inngest = new Inngest({
-  id: 'inngest-swag-store',
+  id: process.env.INNGEST_APP_ID ?? 'inngest-swag-store',
   middleware,
 });

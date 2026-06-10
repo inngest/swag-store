@@ -48,6 +48,12 @@ type StepMessage = {
   ts: number;
 };
 
+type StatusMessage = {
+  status: 'pending' | 'fulfilled' | 'shipped';
+  tracking?: string;
+  ts: number;
+};
+
 type Hydrated = {
   items: string;
   totalCents: number;
@@ -55,6 +61,8 @@ type Hydrated = {
   email: string;
   name: string;
   createdAt: string;
+  status: string;
+  tracking: string;
 };
 
 export function OrderStatusClient({
@@ -67,6 +75,7 @@ export function OrderStatusClient({
   const [messages, setMessages] = React.useState<StepMessage[]>([]);
   const [startTs, setStartTs] = React.useState<number | null>(null);
   const [hydrated, setHydrated] = React.useState<Hydrated | null>(null);
+  const [liveStatus, setLiveStatus] = React.useState<StatusMessage | null>(null);
 
   // Hydrate from sheet on mount: if the order is recorded, every step is done.
   React.useEffect(() => {
@@ -82,6 +91,8 @@ export function OrderStatusClient({
           email: detail.email,
           name: detail.name,
           createdAt: detail.createdAt,
+          status: detail.status,
+          tracking: detail.tracking,
         });
       } catch (err) {
         console.error('[order-hydrate] failed', err);
@@ -110,6 +121,10 @@ export function OrderStatusClient({
           },
           (message) => {
             if (cancelled) return;
+            if (message.topic === 'status') {
+              setLiveStatus(message.data as StatusMessage);
+              return;
+            }
             const data = message.data as StepMessage;
             setMessages((prev) => [...prev, data]);
             setStartTs((s) => s ?? data.ts);
@@ -210,6 +225,24 @@ export function OrderStatusClient({
   const activeIdx = stepStatus.findIndex((s) => s === 'running');
   const [open, setOpen] = React.useState(true);
 
+  // Current fulfillment state: live realtime update wins, then the recorded order.
+  const orderStatus = liveStatus?.status ?? hydrated?.status ?? '';
+  const trackingNumber = (liveStatus?.tracking ?? hydrated?.tracking ?? '').trim();
+  const statusLabel = !allDone
+    ? 'IN PROGRESS · LIVE'
+    : orderStatus === 'shipped'
+      ? 'ORDER SHIPPED'
+      : orderStatus === 'fulfilled'
+        ? 'ORDER FULFILLED'
+        : 'ORDER RECEIVED';
+  const headline = !allDone
+    ? 'Shipping…'
+    : orderStatus === 'shipped'
+      ? 'Shipped.'
+      : orderStatus === 'fulfilled'
+        ? 'Fulfilled.'
+        : 'Received.';
+
   const paymentOutput = stepOutputs[0] as { amount?: number; currency?: string } | undefined;
   const inventoryOutput = stepOutputs[1] as
     | {
@@ -266,10 +299,10 @@ export function OrderStatusClient({
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', padding: '40px 32px', gap: 32 }}>
           <div>
             <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--citrus)', marginBottom: 18 }}>
-              {allDone ? 'ORDER RECEIVED' : 'IN PROGRESS · LIVE'}
+              {statusLabel}
             </div>
             <h1 className="display" style={{ fontSize: 'clamp(64px, 9vw, 144px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.02em', textTransform: 'uppercase', margin: 0 }}>
-              {allDone ? 'Received.' : 'Shipping…'}
+              {headline}
             </h1>
             <p style={{ fontSize: 15, lineHeight: 1.55, maxWidth: 520, marginTop: 24, color: 'rgba(245, 240, 232, 0.78)' }}>
               You&apos;re watching the live execution of <span className="mono">fulfill-order.ts</span>, an Inngest durable function. Each step is independently retried, persisted, and observable. This page subscribes to Realtime channel <span className="mono">order:{orderId}</span>.
@@ -279,6 +312,8 @@ export function OrderStatusClient({
             <OrderMetric label="ORDER ID" value={orderId} mono />
             <OrderMetric label="ITEMS" value={itemsLabel} />
             <OrderMetric label="TOTAL" value={totalLabel} mono />
+            <OrderMetric label="STATUS" value={(orderStatus || 'pending').toUpperCase()} mono />
+            {trackingNumber && <OrderMetric label="TRACKING" value={trackingNumber} mono />}
             <OrderMetric label="ETA" value="3—5 BUSINESS DAYS · USPS" />
           </div>
         </div>

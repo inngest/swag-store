@@ -8,9 +8,14 @@ export async function ensureStripeCouponForDiscount(discount: AppliedDiscount): 
   const stripe = getStripe();
 
   try {
-    await stripe.coupons.retrieve(couponId);
-    await setDiscountStripeCouponId({ code: discount.code, stripeCouponId: couponId });
-    return couponId;
+    const existing = await stripe.coupons.retrieve(couponId);
+    if (existing.valid) {
+      await setDiscountStripeCouponId({ code: discount.code, stripeCouponId: couponId });
+      return couponId;
+    }
+    // Coupon exists but is exhausted/expired (e.g. a re-issued code name).
+    // Delete it so we can recreate a fresh one below.
+    await stripe.coupons.del(couponId);
   } catch (err) {
     if (!isStripeNotFound(err)) throw err;
   }

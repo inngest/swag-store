@@ -10,8 +10,9 @@ For the person running the store day to day (Riley). No code knowledge required 
 
 | What | Where | Notes |
 |---|---|---|
-| Store | https://swag.inngest.com | What customers see |
-| Admin dashboard | https://swag.inngest.com/admin | Sign in with your @inngest.com Google account (Clerk). Access is allowlisted: `sterling@inngest.com`, `riley@inngest.com` |
+| Store (production) | https://swag-store-production.up.railway.app | What customers see. (`swag.inngest.com` DNS is not set up yet — see DEV-401.) |
+| Admin dashboard | https://swag-store-production.up.railway.app/admin | Sign in with your @inngest.com Google account (Clerk). Access is allowlisted: `sterling@inngest.com`, `riley@inngest.com` |
+| QA copy (for testing) | https://swag-store-qa.vercel.app | Same code, isolated database + Inngest sandbox. Break this one, not prod. |
 | Order workflow engine | Inngest dashboard (production env) | Every order runs through the `fulfill-order` function; status changes run through `update-order-status` |
 | Payments | Stripe dashboard (Inngest account) | **Currently TEST MODE** — see section 6 |
 | Hosting | Railway project `prolific-courtesy`, service `swag-store` | App + Postgres. Logs live here |

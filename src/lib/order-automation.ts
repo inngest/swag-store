@@ -1,6 +1,6 @@
 import { inngest } from '@/inngest/client';
 import { getCheckoutSubtotalCents, normalizeCheckoutItems, type CheckoutCartItem } from './checkout';
-import { runSwagCodeAgent, type SwagCodeAgentKind } from './discount-code-agent';
+import { runSwagCodeAgent, runSwagCodeAgentBatch, type SwagCodeAgentKind } from './discount-code-agent';
 import { getStripe } from './stripe';
 import { ensureStripeCouponForDiscount } from './stripe-discounts';
 import {
@@ -96,6 +96,16 @@ export async function generateSwagCodeForActor(input: {
   kind: SwagCodeAgentKind;
 }): Promise<AdminDiscountCode> {
   return runSwagCodeAgent(input);
+}
+
+export async function generateSwagCodesForActor(input: {
+  actorEmail: string;
+  recipient?: string;
+  purpose?: string;
+  kind: SwagCodeAgentKind;
+  count?: number;
+}): Promise<AdminDiscountCode[]> {
+  return runSwagCodeAgentBatch(input);
 }
 
 export async function listAutomationProducts() {

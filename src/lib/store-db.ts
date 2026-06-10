@@ -138,6 +138,7 @@ export type AdminDiscountCode = {
   timesRedeemed: number;
   active: boolean;
   stripeCouponId: string;
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -343,6 +344,7 @@ async function ensureStoreSchema(): Promise<void> {
       times_redeemed integer not null default 0,
       active boolean not null default true,
       stripe_coupon_id text not null default '',
+      created_by text not null default '',
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       constraint discount_codes_type_check check (type in ('amount_off', 'percent_off')),
@@ -354,6 +356,8 @@ async function ensureStoreSchema(): Promise<void> {
       constraint discount_codes_max_redemptions_check check (max_redemptions = 1),
       constraint discount_codes_times_redeemed_check check (times_redeemed >= 0)
     );
+
+    alter table discount_codes add column if not exists created_by text not null default '';
 
     update discount_codes set max_redemptions = 1 where max_redemptions is null or max_redemptions <> 1;
     alter table discount_codes alter column max_redemptions set default 1;
@@ -1146,6 +1150,7 @@ export async function upsertDiscountCode(input: {
   percentOff?: number | null;
   maxRedemptions?: number | null;
   active?: boolean;
+  createdBy?: string;
 }): Promise<void> {
   requireStoreDatabase();
   await ensureStoreReady();
@@ -1166,9 +1171,9 @@ export async function upsertDiscountCode(input: {
   await getPool().query(
     `insert into discount_codes (
        code, label, type, amount_off_cents, percent_off, max_redemptions,
-       active, stripe_coupon_id, created_at, updated_at
+       active, stripe_coupon_id, created_by, created_at, updated_at
      )
-     values ($1, $2, $3, $4, $5, $6, $7, '', now(), now())
+     values ($1, $2, $3, $4, $5, $6, $7, '', $8, now(), now())
      on conflict (code) do update set
        label = excluded.label,
        type = excluded.type,
@@ -1186,9 +1191,12 @@ export async function upsertDiscountCode(input: {
       percentOff,
       1,
       input.active ?? true,
+      String(input.createdBy ?? '').trim(),
     ],
   );
 }
+
+export const MAX_DISCOUNT_CODE_BATCH = 100;
 
 export async function generateSingleUseDiscountCode(input: {
   prefix?: string;
@@ -1196,35 +1204,65 @@ export async function generateSingleUseDiscountCode(input: {
   type: DiscountCodeType;
   amountOffCents?: number | null;
   percentOff?: number | null;
+  createdBy?: string;
 }): Promise<AdminDiscountCode> {
+  const [code] = await generateSingleUseDiscountCodes({ ...input, count: 1 });
+  return code;
+}
+
+export async function generateSingleUseDiscountCodes(input: {
+  prefix?: string;
+  label?: string;
+  type: DiscountCodeType;
+  amountOffCents?: number | null;
+  percentOff?: number | null;
+  count?: number;
+  createdBy?: string;
+}): Promise<AdminDiscountCode[]> {
   requireStoreDatabase();
   await ensureStoreReady();
 
-  const prefix = normalizeDiscountCode(input.prefix || 'SWAG').slice(0, 16);
+  const count = Math.floor(Number(input.count ?? 1));
+  if (!Number.isFinite(count) || count < 1 || count > MAX_DISCOUNT_CODE_BATCH) {
+    throw new Error(`Batch count must be between 1 and ${MAX_DISCOUNT_CODE_BATCH}.`);
+  }
+
+  const prefix = normalizeDiscountCodePrefix(input.prefix || 'SWAG');
   const label = String(input.label ?? '').trim();
+  const createdBy = String(input.createdBy ?? '').trim();
   const amountOffCents =
     input.type === 'amount_off' ? Math.max(1, Math.floor(Number(input.amountOffCents ?? 0))) : null;
   const percentOff = input.type === 'percent_off' ? Number(input.percentOff ?? 0) : null;
 
   validateDiscountConfig({ code: prefix, type: input.type, amountOffCents, percentOff });
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const code = `${prefix}-${randomCodeSuffix()}`;
-    const res = await getPool().query(
-      `insert into discount_codes (
-         code, label, type, amount_off_cents, percent_off, max_redemptions,
-         active, stripe_coupon_id, created_at, updated_at
-       )
-       values ($1, $2, $3, $4, $5, 1, true, '', now(), now())
-       on conflict (code) do nothing
-       returning *`,
-      [code, label, input.type, amountOffCents, percentOff],
-    );
+  const generated: AdminDiscountCode[] = [];
+  while (generated.length < count) {
+    let inserted: AdminDiscountCode | null = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = `${prefix}-${randomCodeSuffix()}`;
+      const res = await getPool().query(
+        `insert into discount_codes (
+           code, label, type, amount_off_cents, percent_off, max_redemptions,
+           active, stripe_coupon_id, created_by, created_at, updated_at
+         )
+         values ($1, $2, $3, $4, $5, 1, true, '', $6, now(), now())
+         on conflict (code) do nothing
+         returning *`,
+        [code, label, input.type, amountOffCents, percentOff, createdBy],
+      );
 
-    if (res.rows[0]) return rowToAdminDiscountCode(res.rows[0]);
+      if (res.rows[0]) {
+        inserted = rowToAdminDiscountCode(res.rows[0]);
+        break;
+      }
+    }
+
+    if (!inserted) throw new Error('Could not generate a unique discount code.');
+    generated.push(inserted);
   }
 
-  throw new Error('Could not generate a unique discount code.');
+  return generated;
 }
 
 export async function updateDiscountCodeActive({
@@ -1900,6 +1938,7 @@ function rowToAdminDiscountCode(row: Record<string, unknown>): AdminDiscountCode
     timesRedeemed: Number(row.times_redeemed ?? 0),
     active: Boolean(row.active),
     stripeCouponId: String(row.stripe_coupon_id ?? ''),
+    createdBy: String(row.created_by ?? ''),
     createdAt: new Date(row.created_at as string | number | Date).toISOString(),
     updatedAt: new Date(row.updated_at as string | number | Date).toISOString(),
   };
@@ -1929,6 +1968,14 @@ function normalizeDiscountCode(code: string): string {
     throw new Error('Discount codes must be 3-40 characters using letters, numbers, dashes, or underscores.');
   }
   return normalized;
+}
+
+function normalizeDiscountCodePrefix(prefix: string): string {
+  // Trim whitespace and trailing dashes so 'AIEWF-' === 'AIEWF' before the
+  // random suffix is appended, then re-trim after the length cap in case the
+  // cut lands on a dash.
+  const trimmed = prefix.trim().replace(/[-\s]+$/, '');
+  return normalizeDiscountCode(trimmed).slice(0, 16).replace(/-+$/, '');
 }
 
 function randomCodeSuffix(): string {

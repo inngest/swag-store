@@ -10,6 +10,7 @@ import { normalizeProductInput, type ProductUpsertInput } from '@/lib/product-ma
 import {
   applyInventoryAdjustment,
   generateApiToken,
+  generateSingleUseDiscountCodes,
   isOrderStatus,
   isStoreDatabaseEnabled,
   listAdminApiTokens,
@@ -174,9 +175,22 @@ export async function upsertDiscountCodeAction(input: {
   maxRedemptions?: number | null;
   active?: boolean;
 }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   requireDatabaseForMutation();
-  await upsertDiscountCode(input);
+  await upsertDiscountCode({ ...input, createdBy: admin.email });
+}
+
+export async function mintEventDiscountCodesAction(input: {
+  prefix: string;
+  label?: string;
+  type: DiscountCodeType;
+  amountOffCents?: number | null;
+  percentOff?: number | null;
+  count: number;
+}) {
+  const admin = await requireAdmin();
+  requireDatabaseForMutation();
+  return generateSingleUseDiscountCodes({ ...input, createdBy: admin.email });
 }
 
 export async function generateSwagCodeAction(input: {

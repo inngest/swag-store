@@ -9,6 +9,7 @@ import {
   fetchAdminSubscriptionToken,
   generateApiTokenAction,
   generateSwagCodeAction,
+  mintEventDiscountCodesAction,
   requestInventoryImportAction,
   revokeApiTokenAction,
   updateApiTokenAction,
@@ -306,6 +307,17 @@ export function AdminClient({
             setDiscounts((current) => [generated, ...current.filter((row) => row.code !== generated.code)]);
             setStatus(`generated ${generated.code}`);
             return generated;
+          }}
+          onMintBatch={async (input) => {
+            requireLiveAdmin('mint event codes');
+
+            const minted = await mintEventDiscountCodesAction(input);
+            setDiscounts((current) => {
+              const mintedCodes = new Set(minted.map((row) => row.code));
+              return [...minted, ...current.filter((row) => !mintedCodes.has(row.code))];
+            });
+            setStatus(`minted ${minted.length} ${minted.length === 1 ? 'code' : 'codes'}`);
+            return minted;
           }}
           onSave={async (input) => {
             requireLiveAdmin('save discounts');
@@ -846,6 +858,7 @@ function DiscountTable({
   rows,
   canMutate,
   onGenerate,
+  onMintBatch,
   onSave,
   onActiveChange,
 }: {
@@ -856,6 +869,14 @@ function DiscountTable({
     purpose?: string;
     kind: 'sales_credit' | 'devrel_comp';
   }) => Promise<AdminDiscountCode | null>;
+  onMintBatch: (input: {
+    prefix: string;
+    label?: string;
+    type: DiscountCodeType;
+    amountOffCents?: number | null;
+    percentOff?: number | null;
+    count: number;
+  }) => Promise<AdminDiscountCode[] | null>;
   onSave: (input: {
     code: string;
     label?: string;
@@ -875,6 +896,13 @@ function DiscountTable({
   const [purpose, setPurpose] = React.useState('');
   const [latestCode, setLatestCode] = React.useState<AdminDiscountCode | null>(null);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [batchPrefix, setBatchPrefix] = React.useState('');
+  const [batchLabel, setBatchLabel] = React.useState('');
+  const [batchType, setBatchType] = React.useState<DiscountCodeType>('percent_off');
+  const [batchValue, setBatchValue] = React.useState('100');
+  const [batchCount, setBatchCount] = React.useState('1');
+  const [latestBatch, setLatestBatch] = React.useState<AdminDiscountCode[]>([]);
+  const [isMinting, setIsMinting] = React.useState(false);
   const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
   const isSaving = saveState.status === 'saving';
   const fieldsDisabled = !canMutate || isSaving;
@@ -894,6 +922,48 @@ function DiscountTable({
       setSaveState({ status: 'error', message: messageFromError(err) });
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const mintBatch = async () => {
+    const numericValue = parseMoneyInput(batchValue);
+    const count = Math.floor(Number(batchCount));
+    if (!batchPrefix.trim()) {
+      setSaveState({ status: 'error', message: 'Prefix is required.' });
+      return;
+    }
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setSaveState({ status: 'error', message: 'Discount value must be greater than 0.' });
+      return;
+    }
+    if (batchType === 'percent_off' && numericValue > 100) {
+      setSaveState({ status: 'error', message: 'Percent discounts must be 100 or less.' });
+      return;
+    }
+    if (!Number.isFinite(count) || count < 1 || count > 100) {
+      setSaveState({ status: 'error', message: 'Count must be between 1 and 100.' });
+      return;
+    }
+
+    setIsMinting(true);
+    setSaveState({ status: 'saving', message: `Minting ${count} ${count === 1 ? 'code' : 'codes'}.` });
+    try {
+      const minted = await onMintBatch({
+        prefix: batchPrefix,
+        label: batchLabel,
+        type: batchType,
+        amountOffCents: batchType === 'amount_off' ? Math.round(numericValue * 100) : null,
+        percentOff: batchType === 'percent_off' ? numericValue : null,
+        count,
+      });
+      if (minted) {
+        setLatestBatch(minted);
+        setSaveState({ status: 'saved', message: `Minted ${minted.length} ${minted.length === 1 ? 'code' : 'codes'}.` });
+      }
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    } finally {
+      setIsMinting(false);
     }
   };
 
@@ -971,6 +1041,43 @@ function DiscountTable({
         </div>
       )}
 
+      <div className="mono" style={{ padding: '18px 0 0', fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        EVENT CODES
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr 0.7fr 0.6fr auto', gap: 10, padding: '18px 0', borderBottom: '1px solid var(--ink)', alignItems: 'end' }}>
+        <LabeledInput label="PREFIX" value={batchPrefix} onChange={(value) => setBatchPrefix(value.toUpperCase())} disabled={!canMutate || isMinting} placeholder="AIEWF" />
+        <LabeledInput label="CAMPAIGN" value={batchLabel} onChange={setBatchLabel} disabled={!canMutate || isMinting} placeholder="AI Engineer World's Fair" />
+        <div>
+          <div className="mono" style={labelStyle}>TYPE</div>
+          <select value={batchType} onChange={(event) => setBatchType(event.target.value as DiscountCodeType)} disabled={!canMutate || isMinting} style={fieldStyle(!canMutate || isMinting)}>
+            <option value="percent_off">% off</option>
+            <option value="amount_off">$ off</option>
+          </select>
+        </div>
+        <LabeledInput label={batchType === 'amount_off' ? 'DOLLARS' : 'PERCENT'} value={batchValue} onChange={setBatchValue} disabled={!canMutate || isMinting} placeholder="100" />
+        <LabeledInput label="COUNT" value={batchCount} onChange={setBatchCount} disabled={!canMutate || isMinting} placeholder="12" />
+        <button className="btn btn-citrus square" onClick={() => void mintBatch()} disabled={!canMutate || isMinting || !batchPrefix.trim()}>
+          MINT BATCH
+        </button>
+      </div>
+
+      {latestBatch.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'start' }}>
+          <div>
+            <div className="mono" style={labelStyle}>LATEST BATCH ({latestBatch.length})</div>
+            <div className="mono" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {latestBatch.map((row) => row.code).join('\n')}
+            </div>
+          </div>
+          <button
+            className="btn btn-primary square"
+            onClick={() => void navigator.clipboard?.writeText(latestBatch.map((row) => row.code).join('\n'))}
+          >
+            COPY ALL
+          </button>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr 0.7fr auto', gap: 10, padding: '18px 0', borderBottom: '1px solid var(--ink)', alignItems: 'end' }}>
         <LabeledInput label="CODE" value={code} onChange={(value) => setCode(value.toUpperCase())} disabled={fieldsDisabled} placeholder="SALES100" />
         <LabeledInput label="LABEL" value={label} onChange={setLabel} disabled={fieldsDisabled} placeholder="Sales credit" />
@@ -995,7 +1102,7 @@ function DiscountTable({
         </div>
       </div>
 
-      <HeaderGrid columns="1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr" labels={['CODE', 'LABEL', 'VALUE', 'USES', 'STATUS', 'UPDATED', '']} />
+      <HeaderGrid columns="1fr 1.2fr 0.7fr 0.6fr 0.7fr 1fr 0.7fr 0.8fr" labels={['CODE', 'LABEL', 'VALUE', 'USES', 'STATUS', 'CREATED BY', 'UPDATED', '']} />
       {rows.length === 0 && <EmptyState label="No discount codes yet." />}
       {rows.map((row) => (
         <DiscountRow
@@ -1086,7 +1193,7 @@ function DiscountRow({
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.7fr 0.6fr 0.7fr 1fr 0.7fr 0.8fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
       <span className="mono" style={isEditing ? readonlyTextStyle : { fontSize: 11 }}>{row.code}</span>
       {isEditing ? (
         <input value={label} onChange={(event) => setLabel(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
@@ -1112,6 +1219,7 @@ function DiscountRow({
         {row.timesRedeemed}{row.maxRedemptions === null ? '' : ` / ${row.maxRedemptions}`}
       </span>
       <span className="mono" style={{ fontSize: 11 }}>{row.active ? 'active' : 'inactive'}</span>
+      <span className="mono" style={{ fontSize: 10.5, overflowWrap: 'anywhere' }}>{row.createdBy || '-'}</span>
       <span className="mono" style={{ fontSize: 10.5 }}>{new Date(row.updatedAt).toLocaleDateString()}</span>
       <div style={rowActionStyle}>
         {isEditing ? (

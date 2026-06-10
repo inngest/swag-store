@@ -1,5 +1,5 @@
 import {
-  generateSingleUseDiscountCode,
+  generateSingleUseDiscountCodes,
   type AdminDiscountCode,
 } from './store-db';
 
@@ -11,6 +11,17 @@ export async function runSwagCodeAgent(input: {
   purpose?: string;
   kind: SwagCodeAgentKind;
 }): Promise<AdminDiscountCode> {
+  const [code] = await runSwagCodeAgentBatch({ ...input, count: 1 });
+  return code;
+}
+
+export async function runSwagCodeAgentBatch(input: {
+  actorEmail: string;
+  recipient?: string;
+  purpose?: string;
+  kind: SwagCodeAgentKind;
+  count?: number;
+}): Promise<AdminDiscountCode[]> {
   if (input.kind !== 'sales_credit' && input.kind !== 'devrel_comp') {
     throw new Error('Unknown swag code kind.');
   }
@@ -23,11 +34,13 @@ export async function runSwagCodeAgent(input: {
     purpose && `- ${purpose}`,
   ].filter(Boolean);
 
-  return generateSingleUseDiscountCode({
+  return generateSingleUseDiscountCodes({
     prefix: input.kind === 'sales_credit' ? 'SALES' : 'DEVREL',
     label: `${labelParts.join(' ')} · ${input.actorEmail}`,
     type: input.kind === 'sales_credit' ? 'amount_off' : 'percent_off',
     amountOffCents: input.kind === 'sales_credit' ? 10000 : null,
     percentOff: input.kind === 'devrel_comp' ? 100 : null,
+    count: input.count ?? 1,
+    createdBy: input.actorEmail,
   });
 }

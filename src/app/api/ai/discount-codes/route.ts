@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiActor } from '@/lib/api-auth';
-import { generateSwagCodeForActor } from '@/lib/order-automation';
+import { generateSwagCodesForActor } from '@/lib/order-automation';
+import { MAX_DISCOUNT_CODE_BATCH } from '@/lib/store-db';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,20 +10,30 @@ export async function POST(req: NextRequest) {
       kind?: 'sales_credit' | 'devrel_comp';
       recipient?: string;
       purpose?: string;
+      count?: number;
     };
 
     if (body.kind !== 'sales_credit' && body.kind !== 'devrel_comp') {
       return NextResponse.json({ error: 'kind must be sales_credit or devrel_comp' }, { status: 400 });
     }
 
-    const discountCode = await generateSwagCodeForActor({
+    const count = body.count === undefined ? 1 : Math.floor(Number(body.count));
+    if (!Number.isFinite(count) || count < 1 || count > MAX_DISCOUNT_CODE_BATCH) {
+      return NextResponse.json(
+        { error: `count must be an integer between 1 and ${MAX_DISCOUNT_CODE_BATCH}` },
+        { status: 400 },
+      );
+    }
+
+    const discountCodes = await generateSwagCodesForActor({
       actorEmail: actor.email,
       kind: body.kind,
       recipient: body.recipient,
       purpose: body.purpose,
+      count,
     });
 
-    return NextResponse.json({ discountCode });
+    return NextResponse.json({ discountCode: discountCodes[0], discountCodes });
   } catch (err) {
     return apiError(err);
   }

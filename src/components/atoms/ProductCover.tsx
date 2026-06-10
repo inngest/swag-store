@@ -1,8 +1,8 @@
 import * as React from 'react';
 import Image from 'next/image';
-import type { Product } from '@/lib/catalog';
+import { catalogCornerTag, type Product } from '@/lib/catalog';
 
-export function ProductCover({ product }: { product: Product }) {
+export function ProductCover({ product, index }: { product: Product; index?: number }) {
   const baseClass =
     product.cover === 'citrus'
       ? 'gradient-placeholder-citrus'
@@ -23,7 +23,7 @@ export function ProductCover({ product }: { product: Product }) {
         justifyContent: 'center',
       }}
     >
-      <div className="corner-tag mono">{product.cornerTag}</div>
+      <div className="corner-tag mono">{index == null ? product.cornerTag : catalogCornerTag(product, index)}</div>
       {product.image && (
         <Image
           src={product.image}

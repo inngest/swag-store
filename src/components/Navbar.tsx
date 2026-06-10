@@ -47,11 +47,10 @@ export function Navbar() {
     lastCount.current = itemCount;
   }, [itemCount]);
 
-  const links = [
-    { id: 'catalog', label: 'Catalog', href: '/' },
-    { id: 'admin', label: 'Admin', href: '/admin' },
-    { id: 'docs', label: 'Docs', href: 'https://www.inngest.com/docs' },
-    { id: 'discord', label: 'Discord', href: 'https://www.inngest.com/discord' },
+  const links: Array<{ id: string; label: string; href: string; external?: boolean }> = [
+    { id: 'catalog', label: 'Catalog', href: '/#catalog-grid' },
+    { id: 'docs', label: 'Inngest Docs', href: 'https://www.inngest.com/docs', external: true },
+    { id: 'discord', label: 'Inngest Discord', href: 'https://www.inngest.com/discord', external: true },
   ];
 
   return (
@@ -70,6 +69,8 @@ export function Navbar() {
               <Link
                 key={l.id}
                 href={l.href}
+                target={l.external ? '_blank' : undefined}
+                rel={l.external ? 'noopener' : undefined}
                 onMouseEnter={() => setHover(l.id)}
                 onMouseLeave={() => setHover(null)}
                 className="mono nav-pill"

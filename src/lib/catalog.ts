@@ -242,6 +242,15 @@ export function formatPrice(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+// Editorial corner tag derived from catalog display position (01, 02, …)
+// instead of the stored tag, so numbering stays sequential as products change.
+export function catalogCornerTag(product: Product, index: number): string {
+  const suffix = product.cornerTag.includes('/')
+    ? product.cornerTag.split('/').slice(1).join('/').trim()
+    : product.cornerTag.trim();
+  return `${String(index + 1).padStart(2, '0')} / ${suffix || product.type.toUpperCase()}`;
+}
+
 export function getVariant(product: Product, size?: string, color?: string): ProductVariant | undefined {
   return product.variants.find(
     (v) => (!size || v.size === size) && (!color || v.color === color)

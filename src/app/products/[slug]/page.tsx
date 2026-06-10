@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { PRODUCTS, formatPrice } from '@/lib/catalog';
+import { PRODUCTS, catalogCornerTag, formatPrice } from '@/lib/catalog';
 import { getPublicProduct, listPublicProducts } from '@/lib/store-db';
 import { AddToCartButton } from '@/components/AddToCartButton';
 import { ProductCover } from '@/components/atoms/ProductCover';
@@ -29,12 +29,12 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       {/* Crumb */}
       <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
         <Link href="/" style={{ cursor: 'pointer' }}>← BACK TO CATALOG</Link>
-        <span>{product.cornerTag} · SKU {product.sku}</span>
+        <span>{catalogCornerTag(product, productIndex)} · SKU {product.sku}</span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', borderBottom: '1px solid var(--ink)' }}>
         <div style={{ aspectRatio: '1 / 1', borderRight: '1px solid var(--ink)', position: 'relative' }}>
-          <ProductCover product={product} />
+          <ProductCover product={product} index={productIndex} />
           <div className="mono" style={{ position: 'absolute', bottom: 16, left: 16, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: product.cover === 'dark' ? 'var(--paper)' : 'var(--ink)' }}>
             FIG. 01 / FRONT
           </div>
@@ -110,7 +110,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               style={{ aspectRatio: '1/1.1', borderRight: i < others.length - 1 ? '1px solid var(--ink)' : 'none', cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column' }}
             >
               <div style={{ flex: 1, position: 'relative' }}>
-                <ProductCover product={p} />
+                <ProductCover product={p} index={products.indexOf(p)} />
               </div>
               <div style={{ padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderTop: '1px solid var(--rule-soft)', background: 'var(--paper)' }}>
                 <div className="display" style={{ fontSize: 18, fontWeight: 500 }}>{p.name}</div>

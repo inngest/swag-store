@@ -37,17 +37,9 @@ function Hero() {
           <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0, textWrap: 'balance' }}>
             Wear<br />the<br />workflow.
           </h1>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 32, maxWidth: 720 }}>
-            <p style={{ fontSize: 14, lineHeight: 1.55, margin: 0, maxWidth: 380 }}>
-              Office-stock swag, shipped by a durable Inngest workflow you can watch run in real-time.
-            </p>
-            <div className="mono" style={{ fontSize: 11, lineHeight: 1.7, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              <div>+ FREE shipping over $40</div>
-              <div>+ Ships in 3—5 days</div>
-              <div>+ Returns within 30</div>
-              <div>+ Railway-backed inventory</div>
-            </div>
-          </div>
+          <p style={{ fontSize: 14, lineHeight: 1.55, margin: '32px 0 0', maxWidth: 380 }}>
+            Office-stock swag, shipped by a durable Inngest workflow you can watch run in real-time.
+          </p>
           <div style={{ display: 'flex', gap: 0, marginTop: 36 }}>
             <Link className="btn btn-primary btn-hero-primary square" href="#catalog-grid">
               Shop the catalog →
@@ -63,17 +55,11 @@ function Hero() {
       </div>
 
       <div style={{ borderTop: '1px solid var(--ink)', background: 'var(--hero-strip-bg)', color: 'var(--hero-strip-fg)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 1fr 0.4fr', padding: '16px 32px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 32px' }}>
           <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            01.1<br />01.2
+            BUILT DURABLY
           </div>
-          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', lineHeight: 1.55 }}>
-            ANTI ANTI INFRA CO. TEE<br />
-            STEP.RUN SOCKS
-          </div>
-          <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'right', alignSelf: 'end' }}>
-            <Mark width={28} />
-          </div>
+          <Mark width={28} />
         </div>
       </div>
     </section>
@@ -106,7 +92,7 @@ function BrandBar() {
 
 function CatalogGrid({ products }: { products: Product[] }) {
   return (
-    <section id="catalog-grid">
+    <section id="catalog-grid" style={{ scrollMarginTop: 80 }}>
       <SectionHead
         num="2.0"
         title="THE CATALOG"
@@ -133,7 +119,7 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
       style={{ position: 'relative', cursor: 'pointer', padding: 0, display: 'block' }}
     >
       <div style={{ aspectRatio: '1.05 / 1', position: 'relative', overflow: 'hidden', background: 'var(--bone)' }}>
-        <ProductCover product={product} />
+        <ProductCover product={product} index={index} />
         <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <div className="mono" style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '6px 10px', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             {totalStock > 0 ? `${totalStock} IN STOCK` : 'SOLD OUT'}

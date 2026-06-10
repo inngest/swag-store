@@ -33,7 +33,14 @@ export async function POST(req: NextRequest) {
     });
 
     const shipping = session.collected_information?.shipping_details ?? null;
-    const customerName = session.customer_details?.name ?? shipping?.name ?? null;
+    const customerEmail = session.customer_details?.email ?? session.customer_email ?? null;
+    // Guest checkouts can complete without a billing name, so fall back to the
+    // shipping name (always collected) and, as a last resort, the email
+    // local-part so the admin queue never shows "Unknown".
+    const customerName =
+      session.customer_details?.name ??
+      shipping?.name ??
+      (customerEmail ? customerEmail.split('@')[0] : null);
 
     await inngest.send({
       id: `order-placed-${session.id}`,
@@ -49,7 +56,7 @@ export async function POST(req: NextRequest) {
         // before it lands in Inngest's storage. Non-PII (orderId, totals,
         // line items) stays plaintext for dashboard observability.
         encrypted: {
-          customerEmail: session.customer_details?.email ?? session.customer_email,
+          customerEmail,
           customerName,
           customerPhone: session.customer_details?.phone ?? null,
           shipping: shipping

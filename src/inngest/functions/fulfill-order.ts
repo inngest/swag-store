@@ -3,6 +3,7 @@ import { LibSodiumEncryptionService } from '@inngest/middleware-encryption/strat
 import { inngest } from '../client';
 import { orderChannel, adminChannel } from '../channels';
 import { getStripe } from '@/lib/stripe';
+import { isOrderEmailConfigured, sendOrderConfirmationEmail } from '@/lib/email';
 import { sendOrderFulfillmentFailureSlackMessage } from '@/lib/slack';
 import {
   isStoreDatabaseEnabled,
@@ -76,6 +77,10 @@ export const fulfillOrder = inngest.createFunction(
       // inline (never into step state) and degrade gracefully if we can't.
       const pii = await decryptPii(data.encrypted);
       const shipping = pii?.shipping ?? null;
+      const customerName =
+        pii?.customerName ??
+        shipping?.name ??
+        (pii?.customerEmail ? pii.customerEmail.split('@')[0] : null);
 
       const itemsLabel = (lineItems ?? [])
         .map((li) => {
@@ -96,7 +101,7 @@ export const fulfillOrder = inngest.createFunction(
             orderId,
             createdAt: new Date().toISOString(),
             email: pii?.customerEmail ?? '',
-            name: pii?.customerName ?? '',
+            name: customerName ?? '',
             items: itemsLabel,
             totalCents: amountTotal,
             currency: (currency ?? 'usd').toUpperCase(),
@@ -189,9 +194,14 @@ export const fulfillOrder = inngest.createFunction(
       currency,
     } = data;
     const customerEmail = data.encrypted?.customerEmail;
-    const customerName = data.encrypted?.customerName ?? null;
     const customerPhone = data.encrypted?.customerPhone ?? null;
     const shipping = data.encrypted?.shipping ?? null;
+    // Mirror the webhook's fallback chain so events from other producers (or
+    // older payloads) still record a usable customer name instead of "Unknown".
+    const customerName =
+      data.encrypted?.customerName ??
+      shipping?.name ??
+      (customerEmail ? customerEmail.split('@')[0] : null);
 
     const adminItems = (lineItems ?? []).map((li) => ({
       name: li.productName ?? li.description ?? 'item',
@@ -302,11 +312,34 @@ export const fulfillOrder = inngest.createFunction(
 
     await emit('send-confirmation', 'running');
     const confirmation = await step.run('send-confirmation', async () => {
-      return {
-        delegatedTo: 'stripe',
-        sent: true,
-        notedAt: new Date().toISOString(),
-      };
+      if (!customerEmail) {
+        return { sent: false as const, skipped: 'no customer email on order' };
+      }
+      if (!isOrderEmailConfigured()) {
+        console.log(
+          `[fulfill-order] send-confirmation skipped for ${orderId}: RESEND_API_KEY not configured`,
+        );
+        return { sent: false as const, skipped: 'RESEND_API_KEY not configured' };
+      }
+      try {
+        return await sendOrderConfirmationEmail({
+          to: customerEmail,
+          orderId,
+          items: (lineItems ?? []).map((li) => ({
+            name: li.productName ?? li.description ?? 'item',
+            quantity: li.quantity ?? 1,
+          })),
+          totalCents: amountTotal,
+          currency: currency ?? 'usd',
+          appUrl: process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
+        });
+      } catch (err) {
+        // A failed confirmation email must never fail the order. Log without
+        // PII and surface the error in the step output instead.
+        const reason = errorMessage(err);
+        console.error(`[fulfill-order] send-confirmation failed for ${orderId}: ${reason}`);
+        return { sent: false as const, error: reason };
+      }
     });
     await emit('send-confirmation', 'complete', confirmation);
 

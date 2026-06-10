@@ -17,7 +17,9 @@ export async function POST(req: NextRequest) {
     const session = await createCheckoutSessionForCart({
       items,
       discountCode,
-      origin: req.nextUrl.origin,
+      // Behind Railway's proxy req.nextUrl.origin resolves to the bind
+      // address (0.0.0.0:8080), which breaks Stripe redirect URLs.
+      origin: process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin,
     });
 
     return NextResponse.json({ url: session.url, orderId: session.orderId });

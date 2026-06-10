@@ -22,6 +22,9 @@ export type ProductUpsertInput = {
   priceDollars: string;
   category: Product['category'];
   image?: string;
+  imageSourceUrl?: string;
+  imageBase64?: string;
+  imageContentType?: string;
   imagePlaceholder?: string;
   colors?: Array<{ name: string; hex?: string; label?: string }>;
   sizes?: Array<ProductSize | string>;
@@ -65,6 +68,21 @@ export const productUpsertInputSchema = {
     image: {
       type: 'string',
       description: 'Local path like /products/shirt.png or an https image URL.',
+    },
+    imageSourceUrl: {
+      type: 'string',
+      description:
+        'Optional https URL of a product image for the server to fetch and store. Must resolve to image/png, image/jpeg, or image/webp at 4MB or smaller (SVG is rejected). When provided, the stored copy is served from /api/product-images/<id> and overrides image. Provide imageSourceUrl or imageBase64, not both.',
+    },
+    imageBase64: {
+      type: 'string',
+      description:
+        'Optional base64-encoded image bytes to upload inline. Requires imageContentType. Same validation as imageSourceUrl: png/jpeg/webp only, 4MB max, bytes must match the declared type. When provided, the stored copy is served from /api/product-images/<id> and overrides image.',
+    },
+    imageContentType: {
+      type: 'string',
+      enum: ['image/png', 'image/jpeg', 'image/webp'],
+      description: 'Content type of imageBase64. Required when imageBase64 is provided.',
     },
     imagePlaceholder: {
       type: 'string',

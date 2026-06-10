@@ -371,6 +371,18 @@ async function ensureStoreSchema(): Promise<void> {
 
     create unique index if not exists discount_redemptions_code_unique on discount_redemptions (code);
 
+    create table if not exists product_images (
+      id text primary key,
+      product_id text not null default '',
+      content_type text not null,
+      bytes bytea not null,
+      size_bytes integer not null,
+      actor_email text not null default '',
+      created_at timestamptz not null default now()
+    );
+
+    create index if not exists product_images_product_idx on product_images (product_id);
+
     create table if not exists api_tokens (
       id bigserial primary key,
       name text not null,

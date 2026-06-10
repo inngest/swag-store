@@ -45,6 +45,12 @@ Never skip states, and never edit order rows in the database directly.
 - **Full reset** (`POST /api/inventory/reset`) reseeds everything from the code-side catalog. This is a developer escape hatch, not an operator tool. Don't.
 - Orders reserve inventory automatically; you never decrement stock for an order by hand.
 
+## 4b. Product images
+
+- `/admin` → Products → edit a product → **UPLOAD** button under the image field. Pick a PNG/JPG/WebP (max 4MB), upload, then hit SAVE to persist. The old text field still works for pasting an https image URL.
+- Agents can set images too: `/api/ai/products` and the MCP `upsert_product` tool accept `imageSourceUrl` (an https link the server fetches) or `imageBase64`.
+- Uploaded images are stored in the database and served from `/api/product-images/…` — no separate hosting to manage.
+
 ## 5. API tokens (for automations/agents)
 
 `/admin` → **API Tokens** — generate revocable tokens for `/api/ai/products`, `/api/ai/discount-codes`, `/api/ai/orders`, and `/api/mcp`. The token is shown once at creation. Revoke from the same screen; revocation is immediate.

@@ -15,6 +15,7 @@ import {
   updateDiscountCodeActiveAction,
   updateInventoryAction,
   updateOrderStatusAction,
+  uploadProductImageAction,
   upsertDiscountCodeAction,
   upsertProductAction,
 } from '@/app/admin/actions';
@@ -377,18 +378,23 @@ function ProductManager({
   const [draft, setDraft] = React.useState<ProductUpsertInput>(() => emptyProductInput());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const [uploadState, setUploadState] = React.useState<SaveState>(idleSaveState);
+  const imageFileRef = React.useRef<HTMLInputElement>(null);
   const isSaving = saveState.status === 'saving';
+  const isUploading = uploadState.status === 'saving';
 
   const editProduct = (product: Product) => {
     setEditingId(product.id);
     setDraft(productToInput(product));
     setSaveState(idleSaveState);
+    setUploadState(idleSaveState);
   };
 
   const reset = () => {
     setEditingId(null);
     setDraft(emptyProductInput());
     setSaveState(idleSaveState);
+    setUploadState(idleSaveState);
   };
 
   const cancelEdit = () => {
@@ -402,6 +408,31 @@ function ProductManager({
 
   const update = (patch: Partial<ProductUpsertInput>) => setDraft((current) => ({ ...current, ...patch }));
   const fieldsDisabled = !canMutate || isSaving;
+
+  const uploadImage = async () => {
+    if (!canMutate) {
+      setUploadState({ status: 'error', message: 'Connect a database before uploading images.' });
+      return;
+    }
+    const file = imageFileRef.current?.files?.[0];
+    if (!file) {
+      setUploadState({ status: 'error', message: 'Choose an image file first.' });
+      return;
+    }
+
+    setUploadState({ status: 'saving', message: 'Uploading image.' });
+    try {
+      const formData = new FormData();
+      formData.set('file', file);
+      if (editingId) formData.set('productId', editingId);
+      const uploaded = await uploadProductImageAction(formData);
+      update({ image: uploaded.url });
+      setUploadState({ status: 'saved', message: 'Image uploaded. Save the product to apply it.' });
+      if (imageFileRef.current) imageFileRef.current.value = '';
+    } catch (err) {
+      setUploadState({ status: 'error', message: messageFromError(err) });
+    }
+  };
 
   const submit = async () => {
     if (!canMutate) {
@@ -469,6 +500,23 @@ function ProductManager({
 
           <div style={{ display: 'grid', gap: 10, paddingTop: 10 }}>
             <LabeledInput label="IMAGE PATH / URL" value={draft.image ?? ''} onChange={(value) => update({ image: value })} disabled={fieldsDisabled} placeholder="/products/shirt-grey.png" />
+            <div>
+              <div className="mono" style={labelStyle}>UPLOAD IMAGE (PNG / JPEG / WEBP, MAX 4MB)</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  ref={imageFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={fieldsDisabled || isUploading}
+                  onChange={() => setUploadState(idleSaveState)}
+                  style={{ ...fieldStyle(fieldsDisabled || isUploading), flex: '1 1 220px', width: 'auto' }}
+                />
+                <button className="btn btn-primary square" onClick={() => void uploadImage()} disabled={fieldsDisabled || isUploading}>
+                  {isUploading ? 'UPLOADING' : 'UPLOAD'}
+                </button>
+                <ActionStatus state={uploadState} />
+              </div>
+            </div>
             <LabeledInput label="IMAGE PLACEHOLDER" value={draft.imagePlaceholder ?? ''} onChange={(value) => update({ imagePlaceholder: value })} disabled={fieldsDisabled} placeholder="linear-gradient(...)" />
             <LabeledInput label="TAGLINE" value={draft.tagline ?? ''} onChange={(value) => update({ tagline: value })} disabled={fieldsDisabled} placeholder="Office stock for customers" />
             <LabeledInput label="CARD BLURB" value={draft.blurb ?? ''} onChange={(value) => update({ blurb: value })} disabled={fieldsDisabled} placeholder="Short product card copy" />

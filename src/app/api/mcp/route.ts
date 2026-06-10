@@ -18,6 +18,7 @@ import {
   type ProductUpsertInput,
 } from '@/lib/product-management';
 import { parseInventoryDocument, type InventoryImportRow } from '@/lib/inventory-import';
+import { resolveProductImageInput } from '@/lib/product-images';
 import {
   applyInventoryAdjustment,
   listAdminInventory,
@@ -300,6 +301,7 @@ const tools = [
         'Validates and normalizes product input without writing to the database.',
         'Use this before upsert_product so the user or agent can inspect generated ids, slug, price cents, color defaults, size ordering, and variants.',
         'Accepts the same input as upsert_product, including preferred structured colors, sizes, variants, and tags.',
+        'imageSourceUrl and imageBase64 are validated and stored only by upsert_product; preview does not fetch or store image data.',
       ].join(' '),
     inputSchema: productUpsertInputSchema,
     outputSchema: {
@@ -331,6 +333,7 @@ const tools = [
         'Structured variants are preferred. Legacy variantsText is newline-separated CSV with preferred format variant_id,size,color,stock.',
         'For one-size products, leave size blank: var_step-socks-one,,citrus,58.',
         'For sized products, valid sizes are XS, S, M, L, XL, XXL, XXXL and are rendered in that order.',
+        'Image options: pass image as a /products/*.png path or https URL, pass imageSourceUrl as an https URL the server fetches and stores, or pass imageBase64 + imageContentType for an inline upload. Stored uploads must be png, jpeg, or webp at 4MB or smaller, are served from /api/product-images/<id>, and set product.image automatically.',
         'This tool writes to the live product database and replaces stale variants for that product.',
       ].join(' '),
     inputSchema: productUpsertInputSchema,
@@ -823,7 +826,14 @@ async function callTool(
   }
 
   if (name === 'upsert_product') {
-    const product = normalizeProductInput(args as ProductUpsertInput);
+    const input = args as ProductUpsertInput;
+    const product = normalizeProductInput(input);
+    const uploadedImageUrl = await resolveProductImageInput({
+      productId: product.id,
+      actorEmail,
+      input,
+    });
+    if (uploadedImageUrl) product.image = uploadedImageUrl;
     await upsertAdminProduct(product);
     await inngest.send({
       id: `inventory-changed-mcp-product-${product.id}-${Date.now()}`,
@@ -1002,6 +1012,7 @@ function isValidationMessage(message: string): boolean {
     'direct api order submission',
     'price',
     'variant line',
+    'image',
   ].some((fragment) => message.includes(fragment));
 }
 

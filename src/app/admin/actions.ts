@@ -5,6 +5,7 @@ import { inngest } from '@/inngest/client';
 import { adminChannel } from '@/inngest/channels';
 import { requireAdmin } from '@/lib/admin-auth';
 import { runSwagCodeAgent, type SwagCodeAgentKind } from '@/lib/discount-code-agent';
+import { saveProductImage } from '@/lib/product-images';
 import { normalizeProductInput, type ProductUpsertInput } from '@/lib/product-management';
 import {
   applyInventoryAdjustment,
@@ -109,6 +110,23 @@ export async function upsertProductAction(input: ProductUpsertInput) {
     },
   });
   return product;
+}
+
+export async function uploadProductImageAction(formData: FormData) {
+  const admin = await requireAdmin();
+  requireDatabaseForMutation();
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) {
+    throw new Error('Choose an image file to upload.');
+  }
+  const productId = String(formData.get('productId') ?? '').trim();
+  const buffer = Buffer.from(await file.arrayBuffer());
+  return saveProductImage({
+    productId,
+    contentType: file.type,
+    buffer,
+    actorEmail: admin.email,
+  });
 }
 
 export async function requestInventoryImportAction() {

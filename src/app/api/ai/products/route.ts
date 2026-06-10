@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { inngest } from '@/inngest/client';
 import { requireApiActor } from '@/lib/api-auth';
 import { listAutomationProducts } from '@/lib/order-automation';
+import { resolveProductImageInput } from '@/lib/product-images';
 import {
   normalizeProductInput,
   productUpsertInputSchema,
@@ -21,7 +22,8 @@ const productApiSpec = {
       method: 'POST',
       path: '/api/ai/products',
       auth: 'Bearer token from /admin API Tokens or SWAG_STORE_API_TOKEN',
-      description: 'Creates or updates one product, including images, price, copy, colors, sizes, and variants.',
+      description:
+        'Creates or updates one product, including images, price, copy, colors, sizes, and variants. Image options: pass image as a /products/*.png path or https URL, pass imageSourceUrl as an https URL for the server to fetch and store, or pass imageBase64 + imageContentType for an inline upload. Stored uploads are served from /api/product-images/<id> and set product.image automatically.',
       inputSchema: productUpsertInputSchema,
     },
   },
@@ -41,6 +43,12 @@ export async function POST(req: NextRequest) {
     const actor = await requireApiActor(req);
     const input = (await req.json()) as ProductUpsertInput;
     const product = normalizeProductInput(input);
+    const uploadedImageUrl = await resolveProductImageInput({
+      productId: product.id,
+      actorEmail: actor.email,
+      input,
+    });
+    if (uploadedImageUrl) product.image = uploadedImageUrl;
     await upsertAdminProduct(product);
     await inngest.send({
       id: `inventory-changed-api-product-${product.id}-${Date.now()}`,
@@ -65,7 +73,7 @@ function apiError(err: unknown) {
     ? 401
     : message.includes('DATABASE_URL')
       ? 503
-      : message.includes('required') || message.includes('Variant line') || message.includes('Price must')
+      : message.includes('required') || message.includes('Variant line') || message.includes('Price must') || message.includes('Image') || message.includes('image')
         ? 400
         : 500;
   return NextResponse.json({ error: message }, { status });

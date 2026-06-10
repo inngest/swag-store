@@ -50,6 +50,7 @@ export default async function AdminPage() {
       initialApiTokens={apiTokens}
       initialProducts={products}
       isDatabaseBacked={isStoreDatabaseEnabled()}
+      canImportSheet={Boolean(process.env.INVENTORY_SHEET_ID ?? process.env.ORDERS_SHEET_ID)}
     />
   );
 }

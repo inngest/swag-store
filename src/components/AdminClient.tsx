@@ -11,6 +11,7 @@ import {
   generateSwagCodeAction,
   requestInventoryImportAction,
   revokeApiTokenAction,
+  updateApiTokenAction,
   updateDiscountCodeActiveAction,
   updateInventoryAction,
   updateOrderStatusAction,
@@ -39,6 +40,13 @@ type ImportMessage = {
   ts: number;
 };
 
+type SaveState = {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  message?: string;
+};
+
+const idleSaveState: SaveState = { status: 'idle' };
+
 export function AdminClient({
   adminEmail,
   initialInventory,
@@ -48,6 +56,7 @@ export function AdminClient({
   initialApiTokens,
   initialProducts,
   isDatabaseBacked,
+  canImportSheet,
 }: {
   adminEmail: string;
   initialInventory: AdminInventoryRow[];
@@ -57,6 +66,7 @@ export function AdminClient({
   initialApiTokens: AdminApiToken[];
   initialProducts: Product[];
   isDatabaseBacked: boolean;
+  canImportSheet: boolean;
 }) {
   const [tab, setTab] = React.useState<Tab>('inventory');
   const [inventory, setInventory] = React.useState(initialInventory);
@@ -71,20 +81,25 @@ export function AdminClient({
   const [importPulse, setImportPulse] = React.useState<ImportMessage | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
-  const refresh = React.useCallback(() => {
-    startTransition(() => {
-      void (async () => {
-        const next = await fetchAdminDashboardAction();
-        setInventory(next.inventory);
-        setOrders(next.orders);
-        setImports(next.imports);
-        setDiscounts(next.discounts);
-        setApiTokens(next.apiTokens);
-        setProducts(next.products);
-        setStatus('refreshed');
-      })();
-    });
+  const loadDashboard = React.useCallback(async () => {
+    const next = await fetchAdminDashboardAction();
+    setInventory(next.inventory);
+    setOrders(next.orders);
+    setImports(next.imports);
+    setDiscounts(next.discounts);
+    setApiTokens(next.apiTokens);
+    setProducts(next.products);
+    return next;
   }, []);
+
+  const refresh = React.useCallback(() => {
+    setStatus('refreshing');
+    startTransition(() => {
+      void loadDashboard()
+        .then(() => setStatus('refreshed'))
+        .catch((err) => setStatus(messageFromError(err)));
+    });
+  }, [loadDashboard]);
 
   React.useEffect(() => {
     if (!isDatabaseBacked) {
@@ -138,16 +153,43 @@ export function AdminClient({
       setStatus('set DATABASE_URL to import');
       return;
     }
+    if (!canImportSheet) {
+      setStatus('set INVENTORY_SHEET_ID or ORDERS_SHEET_ID to import sheet');
+      return;
+    }
 
     setStatus('starting import');
     startTransition(() => {
       void (async () => {
-        await requestInventoryImportAction();
-        setStatus('import requested');
-        refresh();
+        try {
+          await requestInventoryImportAction();
+          setStatus('import requested');
+          await loadDashboard();
+        } catch (err) {
+          setStatus(messageFromError(err));
+        }
       })();
     });
   };
+
+  const requireLiveAdmin = React.useCallback((action: string) => {
+    if (isDatabaseBacked) return;
+    const message = `set DATABASE_URL to ${action}`;
+    setStatus(message);
+    throw new Error(message);
+  }, [isDatabaseBacked]);
+
+  const saveOrderStatus = React.useCallback(async (
+    orderId: string,
+    nextStatus: OrderStatus,
+    tracking: string,
+    notes: string,
+  ) => {
+    requireLiveAdmin('update orders');
+    await updateOrderStatusAction({ orderId, status: nextStatus, tracking, notes });
+    await loadDashboard();
+    setStatus(`saved order ${orderId}`);
+  }, [loadDashboard, requireLiveAdmin]);
 
   return (
     <div>
@@ -218,7 +260,7 @@ export function AdminClient({
           <button className="btn btn-primary square" onClick={refresh} disabled={isPending}>
             REFRESH
           </button>
-          <button className="btn btn-citrus square" onClick={runImport} disabled={isPending || !isDatabaseBacked}>
+          <button className="btn btn-citrus square" onClick={runImport} disabled={isPending || !isDatabaseBacked || !canImportSheet}>
             IMPORT SHEET
           </button>
         </div>
@@ -228,18 +270,11 @@ export function AdminClient({
         <InventoryTable
           rows={inventory}
           canMutate={isDatabaseBacked}
-          onSave={(row, stock, image) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to save inventory');
-              return;
-            }
-
-            startTransition(() => {
-              void (async () => {
-                await updateInventoryAction({ variantId: row.variantId, stock, image });
-                refresh();
-              })();
-            });
+          onSave={async (row, stock, image) => {
+            requireLiveAdmin('save inventory');
+            await updateInventoryAction({ variantId: row.variantId, stock, image });
+            await loadDashboard();
+            setStatus(`saved ${row.productName} ${row.size || row.color || 'inventory'}`);
           }}
         />
       )}
@@ -247,69 +282,41 @@ export function AdminClient({
         <ProductManager
           rows={products}
           canMutate={isDatabaseBacked}
-          onSave={(input) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to save products');
-              return;
-            }
-
-            startTransition(() => {
-              void (async () => {
-                try {
-                  const saved = await upsertProductAction(input);
-                  setStatus(`saved ${saved.name}`);
-                  refresh();
-                } catch (err) {
-                  setStatus(err instanceof Error ? err.message : String(err));
-                }
-              })();
-            });
+          onSave={async (input) => {
+            requireLiveAdmin('save products');
+            const saved = await upsertProductAction(input);
+            await loadDashboard();
+            setStatus(`saved ${saved.name}`);
+            return saved;
           }}
         />
       )}
-      {tab === 'pending' && <OrderTable orders={pendingOrders} canMutate={isDatabaseBacked} onStatusChange={refreshingStatusChange(startTransition, refresh)} />}
-      {tab === 'fulfilled' && <OrderTable orders={fulfilledOrders} canMutate={isDatabaseBacked} onStatusChange={refreshingStatusChange(startTransition, refresh)} />}
-      {tab === 'shipped' && <OrderTable orders={shippedOrders} canMutate={isDatabaseBacked} onStatusChange={refreshingStatusChange(startTransition, refresh)} />}
+      {tab === 'pending' && <OrderTable orders={pendingOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
+      {tab === 'fulfilled' && <OrderTable orders={fulfilledOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
+      {tab === 'shipped' && <OrderTable orders={shippedOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
       {tab === 'discounts' && (
         <DiscountTable
           rows={discounts}
           canMutate={isDatabaseBacked}
           onGenerate={async (input) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to generate discounts');
-              return null;
-            }
+            requireLiveAdmin('generate discounts');
 
             const generated = await generateSwagCodeAction(input);
             setDiscounts((current) => [generated, ...current.filter((row) => row.code !== generated.code)]);
             setStatus(`generated ${generated.code}`);
             return generated;
           }}
-          onSave={(input) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to save discounts');
-              return;
-            }
-
-            startTransition(() => {
-              void (async () => {
-                await upsertDiscountCodeAction(input);
-                refresh();
-              })();
-            });
+          onSave={async (input) => {
+            requireLiveAdmin('save discounts');
+            await upsertDiscountCodeAction(input);
+            await loadDashboard();
+            setStatus(`saved discount ${input.code}`);
           }}
-          onActiveChange={(code, active) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to update discounts');
-              return;
-            }
-
-            startTransition(() => {
-              void (async () => {
-                await updateDiscountCodeActiveAction({ code, active });
-                refresh();
-              })();
-            });
+          onActiveChange={async (code, active) => {
+            requireLiveAdmin('update discounts');
+            await updateDiscountCodeActiveAction({ code, active });
+            await loadDashboard();
+            setStatus(`${active ? 'enabled' : 'paused'} ${code}`);
           }}
         />
       )}
@@ -319,28 +326,24 @@ export function AdminClient({
           adminEmail={adminEmail}
           canMutate={isDatabaseBacked}
           onGenerate={async (input) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to generate API tokens');
-              return null;
-            }
+            requireLiveAdmin('generate API tokens');
 
             const generated = await generateApiTokenAction(input);
             setApiTokens((current) => [generated.apiToken, ...current.filter((row) => row.id !== generated.apiToken.id)]);
             setStatus(`generated token ${generated.apiToken.tokenPrefix}`);
             return generated;
           }}
-          onRevoke={(id) => {
-            if (!isDatabaseBacked) {
-              setStatus('set DATABASE_URL to revoke API tokens');
-              return;
-            }
-
-            startTransition(() => {
-              void (async () => {
-                await revokeApiTokenAction({ id });
-                refresh();
-              })();
-            });
+          onRevoke={async (id) => {
+            requireLiveAdmin('revoke API tokens');
+            await revokeApiTokenAction({ id });
+            await loadDashboard();
+            setStatus('revoked API token');
+          }}
+          onUpdate={async (input) => {
+            requireLiveAdmin('update API tokens');
+            await updateApiTokenAction(input);
+            await loadDashboard();
+            setStatus(`saved API token ${input.name}`);
           }}
         />
       )}
@@ -369,22 +372,61 @@ function ProductManager({
 }: {
   rows: Product[];
   canMutate: boolean;
-  onSave: (input: ProductUpsertInput) => void;
+  onSave: (input: ProductUpsertInput) => Promise<Product>;
 }) {
   const [draft, setDraft] = React.useState<ProductUpsertInput>(() => emptyProductInput());
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
 
   const editProduct = (product: Product) => {
     setEditingId(product.id);
     setDraft(productToInput(product));
+    setSaveState(idleSaveState);
   };
 
   const reset = () => {
     setEditingId(null);
     setDraft(emptyProductInput());
+    setSaveState(idleSaveState);
+  };
+
+  const cancelEdit = () => {
+    const currentProduct = rows.find((product) => product.id === editingId);
+    if (currentProduct) {
+      editProduct(currentProduct);
+      return;
+    }
+    reset();
   };
 
   const update = (patch: Partial<ProductUpsertInput>) => setDraft((current) => ({ ...current, ...patch }));
+  const fieldsDisabled = !canMutate || isSaving;
+
+  const submit = async () => {
+    if (!canMutate) {
+      setSaveState({ status: 'error', message: 'Connect a database before saving products.' });
+      return;
+    }
+    if (!draft.name.trim()) {
+      setSaveState({ status: 'error', message: 'Product name is required.' });
+      return;
+    }
+    if (!draft.sku.trim()) {
+      setSaveState({ status: 'error', message: 'Product SKU is required.' });
+      return;
+    }
+
+    setSaveState({ status: 'saving', message: editingId ? 'Saving product.' : 'Creating product.' });
+    try {
+      const saved = await onSave(draft);
+      setEditingId(saved.id);
+      setDraft(productToInput(saved));
+      setSaveState({ status: 'saved', message: `Saved ${saved.name}.` });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
 
   return (
     <div style={{ padding: '0 32px 32px' }}>
@@ -394,21 +436,21 @@ function ProductManager({
             {editingId ? 'EDIT PRODUCT' : 'NEW PRODUCT'}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.8fr', gap: 10 }}>
-            <LabeledInput label="NAME" value={draft.name} onChange={(value) => update({ name: value })} disabled={!canMutate} placeholder="Anti Anti Infra Co." />
-            <LabeledInput label="SKU" value={draft.sku} onChange={(value) => update({ sku: value.toUpperCase() })} disabled={!canMutate} placeholder="INN-TEE-01" />
-            <LabeledInput label="SLUG" value={draft.slug ?? ''} onChange={(value) => update({ slug: value })} disabled={!canMutate} placeholder="anti-anti-infra-tee" />
-            <LabeledInput label="TYPE" value={draft.type} onChange={(value) => update({ type: value })} disabled={!canMutate} placeholder="T-Shirt" />
-            <LabeledInput label="PRICE" value={draft.priceDollars} onChange={(value) => update({ priceDollars: value })} disabled={!canMutate} placeholder="28" />
+            <LabeledInput label="NAME" value={draft.name} onChange={(value) => update({ name: value })} disabled={fieldsDisabled} placeholder="Anti Anti Infra Co." />
+            <LabeledInput label="SKU" value={draft.sku} onChange={(value) => update({ sku: value.toUpperCase() })} disabled={fieldsDisabled} placeholder="INN-TEE-01" />
+            <LabeledInput label="SLUG" value={draft.slug ?? ''} onChange={(value) => update({ slug: value })} disabled={fieldsDisabled} placeholder="anti-anti-infra-tee" />
+            <LabeledInput label="TYPE" value={draft.type} onChange={(value) => update({ type: value })} disabled={fieldsDisabled} placeholder="T-Shirt" />
+            <LabeledInput label="PRICE" value={draft.priceDollars} onChange={(value) => update({ priceDollars: value })} disabled={fieldsDisabled} placeholder="28" />
             <div>
               <div className="mono" style={labelStyle}>CATEGORY</div>
-              <select value={draft.category} onChange={(event) => update({ category: event.target.value as Product['category'] })} disabled={!canMutate} style={inputStyle}>
+              <select value={draft.category} onChange={(event) => update({ category: event.target.value as Product['category'] })} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
                 <option value="apparel">apparel</option>
                 <option value="accessories">accessories</option>
               </select>
             </div>
             <div>
               <div className="mono" style={labelStyle}>COVER</div>
-              <select value={draft.cover} onChange={(event) => update({ cover: event.target.value as Product['cover'] })} disabled={!canMutate} style={inputStyle}>
+              <select value={draft.cover} onChange={(event) => update({ cover: event.target.value as Product['cover'] })} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
                 <option value="light">light</option>
                 <option value="dark">dark</option>
                 <option value="citrus">citrus</option>
@@ -418,7 +460,7 @@ function ProductManager({
               <input
                 type="checkbox"
                 checked={Boolean(draft.featured)}
-                disabled={!canMutate}
+                disabled={fieldsDisabled}
                 onChange={(event) => update({ featured: event.target.checked })}
               />
               FEATURED
@@ -426,14 +468,14 @@ function ProductManager({
           </div>
 
           <div style={{ display: 'grid', gap: 10, paddingTop: 10 }}>
-            <LabeledInput label="IMAGE PATH / URL" value={draft.image ?? ''} onChange={(value) => update({ image: value })} disabled={!canMutate} placeholder="/products/shirt-grey.png" />
-            <LabeledInput label="IMAGE PLACEHOLDER" value={draft.imagePlaceholder ?? ''} onChange={(value) => update({ imagePlaceholder: value })} disabled={!canMutate} placeholder="linear-gradient(...)" />
-            <LabeledInput label="TAGLINE" value={draft.tagline ?? ''} onChange={(value) => update({ tagline: value })} disabled={!canMutate} placeholder="Office stock for customers" />
-            <LabeledInput label="CARD BLURB" value={draft.blurb ?? ''} onChange={(value) => update({ blurb: value })} disabled={!canMutate} placeholder="Short product card copy" />
-            <LabeledInput label="FABRIC" value={draft.fabric ?? ''} onChange={(value) => update({ fabric: value })} disabled={!canMutate} placeholder="Cotton jersey" />
-            <LabeledInput label="FIT" value={draft.fit ?? ''} onChange={(value) => update({ fit: value })} disabled={!canMutate} placeholder="Unisex, true to size" />
-            <LabeledInput label="CORNER TAG" value={draft.cornerTag ?? ''} onChange={(value) => update({ cornerTag: value })} disabled={!canMutate} placeholder="01 / TEE" />
-            <LabeledInput label="TAGS" value={draft.tagsText ?? ''} onChange={(value) => update({ tagsText: value })} disabled={!canMutate} placeholder="office-stock, launch" />
+            <LabeledInput label="IMAGE PATH / URL" value={draft.image ?? ''} onChange={(value) => update({ image: value })} disabled={fieldsDisabled} placeholder="/products/shirt-grey.png" />
+            <LabeledInput label="IMAGE PLACEHOLDER" value={draft.imagePlaceholder ?? ''} onChange={(value) => update({ imagePlaceholder: value })} disabled={fieldsDisabled} placeholder="linear-gradient(...)" />
+            <LabeledInput label="TAGLINE" value={draft.tagline ?? ''} onChange={(value) => update({ tagline: value })} disabled={fieldsDisabled} placeholder="Office stock for customers" />
+            <LabeledInput label="CARD BLURB" value={draft.blurb ?? ''} onChange={(value) => update({ blurb: value })} disabled={fieldsDisabled} placeholder="Short product card copy" />
+            <LabeledInput label="FABRIC" value={draft.fabric ?? ''} onChange={(value) => update({ fabric: value })} disabled={fieldsDisabled} placeholder="Cotton jersey" />
+            <LabeledInput label="FIT" value={draft.fit ?? ''} onChange={(value) => update({ fit: value })} disabled={fieldsDisabled} placeholder="Unisex, true to size" />
+            <LabeledInput label="CORNER TAG" value={draft.cornerTag ?? ''} onChange={(value) => update({ cornerTag: value })} disabled={fieldsDisabled} placeholder="01 / TEE" />
+            <LabeledInput label="TAGS" value={draft.tagsText ?? ''} onChange={(value) => update({ tagsText: value })} disabled={fieldsDisabled} placeholder="office-stock, launch" />
           </div>
         </div>
 
@@ -441,31 +483,37 @@ function ProductManager({
           <div className="mono" style={{ paddingBottom: 12, fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             DETAILS / VARIANTS
           </div>
-          <TextAreaInput label="DESCRIPTION" value={draft.description ?? ''} onChange={(value) => update({ description: value })} disabled={!canMutate} rows={5} />
+          <TextAreaInput label="DESCRIPTION" value={draft.description ?? ''} onChange={(value) => update({ description: value })} disabled={fieldsDisabled} rows={5} />
           <TextAreaInput
             label="COLORS"
             value={draft.colorsText ?? ''}
             onChange={(value) => update({ colorsText: value })}
-            disabled={!canMutate}
+            disabled={fieldsDisabled}
             rows={4}
             placeholder={'grey,#B8B5AE,Heather Grey\ncitrus,#FF7300,Citrus Glow'}
           />
-          <LabeledInput label="SIZES" value={draft.sizesText ?? ''} onChange={(value) => update({ sizesText: value })} disabled={!canMutate} placeholder="S, M, L, XL, XXL, XXXL" />
+          <LabeledInput label="SIZES" value={draft.sizesText ?? ''} onChange={(value) => update({ sizesText: value })} disabled={fieldsDisabled} placeholder="S, M, L, XL, XXL, XXXL" />
           <TextAreaInput
             label="VARIANTS"
             value={draft.variantsText ?? ''}
             onChange={(value) => update({ variantsText: value })}
-            disabled={!canMutate}
+            disabled={fieldsDisabled}
             rows={8}
             placeholder={'var_aai-tee-grey-s,S,grey,20\nvar_aai-tee-grey-m,M,grey,24\nvar_step-socks-one,,citrus,58'}
           />
           <div style={{ display: 'flex', gap: 8, paddingTop: 12 }}>
-            <button className="btn btn-citrus square" onClick={() => onSave(draft)} disabled={!canMutate || !draft.name.trim() || !draft.sku.trim()}>
+            <button className="btn btn-citrus square" onClick={() => void submit()} disabled={!canMutate || isSaving || !draft.name.trim() || !draft.sku.trim()}>
               {editingId ? 'SAVE PRODUCT' : 'CREATE PRODUCT'}
             </button>
-            <button className="btn btn-primary square" onClick={reset} disabled={!canMutate}>
+            {editingId && (
+              <button className="btn btn-ghost square" onClick={cancelEdit} disabled={isSaving}>
+                CANCEL
+              </button>
+            )}
+            <button className="btn btn-primary square" onClick={reset} disabled={isSaving}>
               NEW
             </button>
+            <ActionStatus state={saveState} />
           </div>
         </div>
       </div>
@@ -515,7 +563,7 @@ function TextAreaInput({
         disabled={disabled}
         placeholder={placeholder}
         rows={rows}
-        style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+        style={{ ...fieldStyle(disabled), resize: 'vertical', lineHeight: 1.5 }}
       />
     </div>
   );
@@ -575,11 +623,11 @@ function InventoryTable({
 }: {
   rows: AdminInventoryRow[];
   canMutate: boolean;
-  onSave: (row: AdminInventoryRow, stock: number, image: string) => void;
+  onSave: (row: AdminInventoryRow, stock: number, image: string) => Promise<void>;
 }) {
   return (
     <div style={{ padding: '0 32px 32px' }}>
-      <HeaderGrid columns="1.3fr 0.8fr 0.7fr 0.7fr 0.6fr 1.6fr 0.5fr" labels={['ITEM', 'SKU', 'SIZE', 'COLOR', 'QTY', 'PHOTO', '']} />
+      <HeaderGrid columns="1.3fr 0.8fr 0.7fr 0.7fr 0.6fr 1.6fr 1fr" labels={['ITEM', 'SKU', 'SIZE', 'COLOR', 'QTY', 'PHOTO', '']} />
       {rows.map((row) => (
         <InventoryRow key={row.variantId} row={row} canMutate={canMutate} onSave={onSave} />
       ))}
@@ -594,13 +642,40 @@ function InventoryRow({
 }: {
   row: AdminInventoryRow;
   canMutate: boolean;
-  onSave: (row: AdminInventoryRow, stock: number, image: string) => void;
+  onSave: (row: AdminInventoryRow, stock: number, image: string) => Promise<void>;
 }) {
   const [stock, setStock] = React.useState(String(row.stock));
   const [image, setImage] = React.useState(row.image);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
+  const fieldsDisabled = !canMutate || isSaving;
+  const parsedStock = Number(stock);
+  const stockIsValid = Number.isSafeInteger(parsedStock) && parsedStock >= 0;
+  const isDirty = stock !== String(row.stock) || image !== row.image;
+
+  const cancel = () => {
+    setStock(String(row.stock));
+    setImage(row.image);
+    setSaveState(idleSaveState);
+  };
+
+  const save = async () => {
+    if (!stockIsValid) {
+      setSaveState({ status: 'error', message: 'Quantity must be a whole number at or above 0.' });
+      return;
+    }
+
+    setSaveState({ status: 'saving', message: 'Saving inventory row.' });
+    try {
+      await onSave(row, parsedStock, image);
+      setSaveState({ status: 'saved', message: 'Inventory saved.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.8fr 0.7fr 0.7fr 0.6fr 1.6fr 0.5fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.8fr 0.7fr 0.7fr 0.6fr 1.6fr 1fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
       <div>
         <Link href={`/products/${row.slug}`} style={{ fontSize: 13, color: 'var(--ink)' }}>{row.productName}</Link>
         <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{row.type}</div>
@@ -608,11 +683,19 @@ function InventoryRow({
       <span className="mono" style={{ fontSize: 11 }}>{row.sku}</span>
       <span className="mono" style={{ fontSize: 11 }}>{row.size || 'ONE'}</span>
       <span className="mono" style={{ fontSize: 11 }}>{row.color || 'DEFAULT'}</span>
-      <input value={stock} onChange={(event) => setStock(event.target.value)} disabled={!canMutate} style={inputStyle} />
-      <input value={image} onChange={(event) => setImage(event.target.value)} disabled={!canMutate} style={inputStyle} />
-      <button className="btn btn-primary square" onClick={() => onSave(row, Number(stock), image)} disabled={!canMutate}>
-        SAVE
-      </button>
+      <input value={stock} onChange={(event) => setStock(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      <input value={image} onChange={(event) => setImage(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      <div style={rowActionStyle}>
+        <button className="btn btn-primary square" onClick={() => void save()} disabled={!canMutate || isSaving || !stockIsValid}>
+          SAVE
+        </button>
+        {isDirty && (
+          <button className="btn btn-ghost square" onClick={cancel} disabled={isSaving}>
+            CANCEL
+          </button>
+        )}
+        <ActionStatus state={saveState} />
+      </div>
     </div>
   );
 }
@@ -624,7 +707,7 @@ function OrderTable({
 }: {
   orders: AdminOrder[];
   canMutate: boolean;
-  onStatusChange: (orderId: string, status: OrderStatus, tracking: string, notes: string) => void;
+  onStatusChange: (orderId: string, status: OrderStatus, tracking: string, notes: string) => Promise<void>;
 }) {
   return (
     <div style={{ padding: '0 32px 32px' }}>
@@ -644,11 +727,32 @@ function OrderRow({
 }: {
   order: AdminOrder;
   canMutate: boolean;
-  onStatusChange: (orderId: string, status: OrderStatus, tracking: string, notes: string) => void;
+  onStatusChange: (orderId: string, status: OrderStatus, tracking: string, notes: string) => Promise<void>;
 }) {
   const [status, setStatus] = React.useState<OrderStatus>(order.status);
   const [tracking, setTracking] = React.useState(order.tracking);
   const [notes, setNotes] = React.useState(order.notes);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
+  const fieldsDisabled = !canMutate || isSaving;
+  const isDirty = status !== order.status || tracking !== order.tracking || notes !== order.notes;
+
+  const cancel = () => {
+    setStatus(order.status);
+    setTracking(order.tracking);
+    setNotes(order.notes);
+    setSaveState(idleSaveState);
+  };
+
+  const save = async () => {
+    setSaveState({ status: 'saving', message: 'Saving order.' });
+    try {
+      await onStatusChange(order.orderId, status, tracking, notes);
+      setSaveState({ status: 'saved', message: 'Order saved.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.2fr 1.6fr 0.9fr 0.8fr 1fr 1fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
@@ -666,17 +770,25 @@ function OrderRow({
           </div>
         )}
       </div>
-      <select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus)} disabled={!canMutate} style={inputStyle}>
+      <select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
         <option value="pending">pending</option>
         <option value="fulfilled">fulfilled</option>
         <option value="shipped">shipped</option>
       </select>
-      <input value={tracking} onChange={(event) => setTracking(event.target.value)} placeholder="Tracking" disabled={!canMutate} style={inputStyle} />
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes" disabled={!canMutate} style={inputStyle} />
-        <button className="btn btn-primary square" onClick={() => onStatusChange(order.orderId, status, tracking, notes)} disabled={!canMutate}>
-          SAVE
-        </button>
+      <input value={tracking} onChange={(event) => setTracking(event.target.value)} placeholder="Tracking" disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      <div style={{ display: 'grid', gap: 6 }}>
+        <div style={rowActionStyle}>
+          <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes" disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+          <button className="btn btn-primary square" onClick={() => void save()} disabled={!canMutate || isSaving || !isDirty}>
+            SAVE
+          </button>
+          {isDirty && (
+            <button className="btn btn-ghost square" onClick={cancel} disabled={isSaving}>
+              CANCEL
+            </button>
+          )}
+        </div>
+        <ActionStatus state={saveState} />
       </div>
     </div>
   );
@@ -704,8 +816,8 @@ function DiscountTable({
     percentOff?: number | null;
     maxRedemptions?: number | null;
     active?: boolean;
-  }) => void;
-  onActiveChange: (code: string, active: boolean) => void;
+  }) => Promise<void>;
+  onActiveChange: (code: string, active: boolean) => Promise<void>;
 }) {
   const [code, setCode] = React.useState('');
   const [label, setLabel] = React.useState('');
@@ -715,35 +827,69 @@ function DiscountTable({
   const [purpose, setPurpose] = React.useState('');
   const [latestCode, setLatestCode] = React.useState<AdminDiscountCode | null>(null);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
+  const fieldsDisabled = !canMutate || isSaving;
 
   const generate = async (kind: 'sales_credit' | 'devrel_comp') => {
     setIsGenerating(true);
+    setSaveState({ status: 'saving', message: 'Generating code.' });
     try {
       const generated = await onGenerate({ recipient, purpose, kind });
       if (generated) {
         setLatestCode(generated);
         setRecipient('');
         setPurpose('');
+        setSaveState({ status: 'saved', message: `Generated ${generated.code}.` });
       }
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const submit = () => {
-    const numericValue = Number(value);
-    onSave({
-      code,
-      label,
-      type,
-      amountOffCents: type === 'amount_off' ? Math.round(numericValue * 100) : null,
-      percentOff: type === 'percent_off' ? numericValue : null,
-      maxRedemptions: 1,
-      active: true,
-    });
+  const resetNewCode = () => {
     setCode('');
     setLabel('');
-    setValue(type === 'amount_off' ? '100' : '100');
+    setType('amount_off');
+    setValue('100');
+    setSaveState(idleSaveState);
+  };
+
+  const submit = async () => {
+    const numericValue = parseMoneyInput(value);
+    if (!code.trim()) {
+      setSaveState({ status: 'error', message: 'Code is required.' });
+      return;
+    }
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setSaveState({ status: 'error', message: 'Discount value must be greater than 0.' });
+      return;
+    }
+    if (type === 'percent_off' && numericValue > 100) {
+      setSaveState({ status: 'error', message: 'Percent discounts must be 100 or less.' });
+      return;
+    }
+
+    setSaveState({ status: 'saving', message: 'Saving code.' });
+    try {
+      await onSave({
+        code,
+        label,
+        type,
+        amountOffCents: type === 'amount_off' ? Math.round(numericValue * 100) : null,
+        percentOff: type === 'percent_off' ? numericValue : null,
+        maxRedemptions: 1,
+        active: true,
+      });
+      setSaveState({ status: 'saved', message: `Saved ${code.toUpperCase()}.` });
+      setCode('');
+      setLabel('');
+      setValue('100');
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
   };
 
   return (
@@ -778,42 +924,169 @@ function DiscountTable({
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr 0.7fr auto', gap: 10, padding: '18px 0', borderBottom: '1px solid var(--ink)', alignItems: 'end' }}>
-        <LabeledInput label="CODE" value={code} onChange={setCode} disabled={!canMutate} placeholder="SALES100" />
-        <LabeledInput label="LABEL" value={label} onChange={setLabel} disabled={!canMutate} placeholder="Sales credit" />
+        <LabeledInput label="CODE" value={code} onChange={(value) => setCode(value.toUpperCase())} disabled={fieldsDisabled} placeholder="SALES100" />
+        <LabeledInput label="LABEL" value={label} onChange={setLabel} disabled={fieldsDisabled} placeholder="Sales credit" />
         <div>
           <div className="mono" style={labelStyle}>TYPE</div>
-          <select value={type} onChange={(event) => setType(event.target.value as DiscountCodeType)} disabled={!canMutate} style={inputStyle}>
+          <select value={type} onChange={(event) => setType(event.target.value as DiscountCodeType)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
             <option value="amount_off">$ off</option>
             <option value="percent_off">% off</option>
           </select>
         </div>
-        <LabeledInput label={type === 'amount_off' ? 'DOLLARS' : 'PERCENT'} value={value} onChange={setValue} disabled={!canMutate} placeholder="100" />
-        <button className="btn btn-citrus square" onClick={submit} disabled={!canMutate || !code.trim()}>
-          ADD SINGLE-USE CODE
-        </button>
+        <LabeledInput label={type === 'amount_off' ? 'DOLLARS' : 'PERCENT'} value={value} onChange={setValue} disabled={fieldsDisabled} placeholder="100" />
+        <div style={rowActionStyle}>
+          <button className="btn btn-citrus square" onClick={() => void submit()} disabled={!canMutate || isSaving || !code.trim()}>
+            ADD SINGLE-USE CODE
+          </button>
+          {(code || label || value !== '100' || type !== 'amount_off') && (
+            <button className="btn btn-ghost square" onClick={resetNewCode} disabled={isSaving}>
+              CANCEL
+            </button>
+          )}
+          <ActionStatus state={saveState} />
+        </div>
       </div>
 
       <HeaderGrid columns="1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr" labels={['CODE', 'LABEL', 'VALUE', 'USES', 'STATUS', 'UPDATED', '']} />
       {rows.length === 0 && <EmptyState label="No discount codes yet." />}
       {rows.map((row) => (
-        <div key={row.code} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
-          <span className="mono" style={{ fontSize: 11 }}>{row.code}</span>
-          <span style={{ fontSize: 12 }}>{row.label || '-'}</span>
-          <span className="mono" style={{ fontSize: 11 }}>
-            {row.type === 'amount_off'
-              ? `$${((row.amountOffCents ?? 0) / 100).toFixed(2)}`
-              : `${row.percentOff ?? 0}%`}
-          </span>
-          <span className="mono" style={{ fontSize: 11 }}>
-            {row.timesRedeemed}{row.maxRedemptions === null ? '' : ` / ${row.maxRedemptions}`}
-          </span>
-          <span className="mono" style={{ fontSize: 11 }}>{row.active ? 'active' : 'inactive'}</span>
-          <span className="mono" style={{ fontSize: 10.5 }}>{new Date(row.updatedAt).toLocaleDateString()}</span>
-          <button className="btn btn-primary square" onClick={() => onActiveChange(row.code, !row.active)} disabled={!canMutate}>
-            {row.active ? 'PAUSE' : 'ENABLE'}
-          </button>
-        </div>
+        <DiscountRow
+          key={row.code}
+          row={row}
+          canMutate={canMutate}
+          onSave={onSave}
+          onActiveChange={onActiveChange}
+        />
       ))}
+    </div>
+  );
+}
+
+function DiscountRow({
+  row,
+  canMutate,
+  onSave,
+  onActiveChange,
+}: {
+  row: AdminDiscountCode;
+  canMutate: boolean;
+  onSave: (input: {
+    code: string;
+    label?: string;
+    type: DiscountCodeType;
+    amountOffCents?: number | null;
+    percentOff?: number | null;
+    maxRedemptions?: number | null;
+    active?: boolean;
+  }) => Promise<void>;
+  onActiveChange: (code: string, active: boolean) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [label, setLabel] = React.useState(row.label);
+  const [type, setType] = React.useState<DiscountCodeType>(row.type);
+  const [value, setValue] = React.useState(discountValue(row));
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
+  const fieldsDisabled = !canMutate || isSaving || !isEditing;
+  const isDirty = label !== row.label || type !== row.type || value !== discountValue(row);
+
+  const cancel = () => {
+    setLabel(row.label);
+    setType(row.type);
+    setValue(discountValue(row));
+    setIsEditing(false);
+    setSaveState(idleSaveState);
+  };
+
+  const save = async () => {
+    const numericValue = parseMoneyInput(value);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setSaveState({ status: 'error', message: 'Discount value must be greater than 0.' });
+      return;
+    }
+    if (type === 'percent_off' && numericValue > 100) {
+      setSaveState({ status: 'error', message: 'Percent discounts must be 100 or less.' });
+      return;
+    }
+
+    setSaveState({ status: 'saving', message: 'Saving discount.' });
+    try {
+      await onSave({
+        code: row.code,
+        label,
+        type,
+        amountOffCents: type === 'amount_off' ? Math.round(numericValue * 100) : null,
+        percentOff: type === 'percent_off' ? numericValue : null,
+        maxRedemptions: 1,
+        active: row.active,
+      });
+      setIsEditing(false);
+      setSaveState({ status: 'saved', message: 'Discount saved.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
+
+  const toggleActive = async () => {
+    setSaveState({ status: 'saving', message: row.active ? 'Pausing code.' : 'Enabling code.' });
+    try {
+      await onActiveChange(row.code, !row.active);
+      setSaveState({ status: 'saved', message: row.active ? 'Code paused.' : 'Code enabled.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
+      <span className="mono" style={isEditing ? readonlyTextStyle : { fontSize: 11 }}>{row.code}</span>
+      {isEditing ? (
+        <input value={label} onChange={(event) => setLabel(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      ) : (
+        <span style={{ fontSize: 12 }}>{row.label || '-'}</span>
+      )}
+      {isEditing ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <select value={type} onChange={(event) => setType(event.target.value as DiscountCodeType)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
+            <option value="amount_off">$ off</option>
+            <option value="percent_off">% off</option>
+          </select>
+          <input value={value} onChange={(event) => setValue(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+        </div>
+      ) : (
+        <span className="mono" style={{ fontSize: 11 }}>
+          {row.type === 'amount_off'
+            ? `$${((row.amountOffCents ?? 0) / 100).toFixed(2)}`
+            : `${row.percentOff ?? 0}%`}
+        </span>
+      )}
+      <span className="mono" style={{ fontSize: 11 }}>
+        {row.timesRedeemed}{row.maxRedemptions === null ? '' : ` / ${row.maxRedemptions}`}
+      </span>
+      <span className="mono" style={{ fontSize: 11 }}>{row.active ? 'active' : 'inactive'}</span>
+      <span className="mono" style={{ fontSize: 10.5 }}>{new Date(row.updatedAt).toLocaleDateString()}</span>
+      <div style={rowActionStyle}>
+        {isEditing ? (
+          <>
+            <button className="btn btn-citrus square" onClick={() => void save()} disabled={!canMutate || isSaving || !isDirty}>
+              SAVE
+            </button>
+            <button className="btn btn-ghost square" onClick={cancel} disabled={isSaving}>
+              CANCEL
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-primary square" onClick={() => setIsEditing(true)} disabled={!canMutate || isSaving}>
+              EDIT
+            </button>
+            <button className="btn btn-primary square" onClick={() => void toggleActive()} disabled={!canMutate || isSaving}>
+              {row.active ? 'PAUSE' : 'ENABLE'}
+            </button>
+          </>
+        )}
+        <ActionStatus state={saveState} />
+      </div>
     </div>
   );
 }
@@ -824,26 +1097,42 @@ function ApiTokenTable({
   canMutate,
   onGenerate,
   onRevoke,
+  onUpdate,
 }: {
   rows: AdminApiToken[];
   adminEmail: string;
   canMutate: boolean;
   onGenerate: (input: { name: string; actorEmail?: string }) => Promise<GeneratedApiToken | null>;
-  onRevoke: (id: number) => void;
+  onRevoke: (id: number) => Promise<void>;
+  onUpdate: (input: { id: number; name: string; actorEmail: string }) => Promise<void>;
 }) {
   const [name, setName] = React.useState('');
   const [actorEmail, setActorEmail] = React.useState(adminEmail);
   const [latestToken, setLatestToken] = React.useState<GeneratedApiToken | null>(null);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
 
   const generate = async () => {
+    if (!name.trim()) {
+      setSaveState({ status: 'error', message: 'Token name is required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(actorEmail.trim())) {
+      setSaveState({ status: 'error', message: 'Actor email must be a valid email address.' });
+      return;
+    }
+
     setIsGenerating(true);
+    setSaveState({ status: 'saving', message: 'Generating token.' });
     try {
       const generated = await onGenerate({ name, actorEmail });
       if (generated) {
         setLatestToken(generated);
         setName('');
+        setSaveState({ status: 'saved', message: `Generated ${generated.apiToken.name}.` });
       }
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
     } finally {
       setIsGenerating(false);
     }
@@ -857,9 +1146,25 @@ function ApiTokenTable({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, padding: '18px 0', borderBottom: '1px solid var(--ink)', alignItems: 'end' }}>
         <LabeledInput label="TOKEN NAME" value={name} onChange={setName} disabled={!canMutate || isGenerating} placeholder="Codex MCP" />
         <LabeledInput label="ACTOR EMAIL" value={actorEmail} onChange={setActorEmail} disabled={!canMutate || isGenerating} placeholder="ai-assistant@inngest.com" />
-        <button className="btn btn-citrus square" onClick={() => void generate()} disabled={!canMutate || isGenerating || !name.trim()}>
-          GENERATE TOKEN
-        </button>
+        <div style={rowActionStyle}>
+          <button className="btn btn-citrus square" onClick={() => void generate()} disabled={!canMutate || isGenerating || !name.trim()}>
+            GENERATE TOKEN
+          </button>
+          {(name || actorEmail !== adminEmail) && (
+            <button
+              className="btn btn-ghost square"
+              onClick={() => {
+                setName('');
+                setActorEmail(adminEmail);
+                setSaveState(idleSaveState);
+              }}
+              disabled={isGenerating}
+            >
+              CANCEL
+            </button>
+          )}
+          <ActionStatus state={saveState} />
+        </div>
       </div>
 
       {latestToken && (
@@ -880,20 +1185,115 @@ function ApiTokenTable({
       <HeaderGrid columns="1fr 0.8fr 1.2fr 0.8fr 0.8fr 1fr 0.7fr" labels={['NAME', 'TOKEN', 'ACTOR', 'STATUS', 'LAST USED', 'CREATED', '']} />
       {rows.length === 0 && <EmptyState label="No API tokens yet." />}
       {rows.map((row) => (
-        <div key={row.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.8fr 1.2fr 0.8fr 0.8fr 1fr 0.7fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
-          <span style={{ fontSize: 12 }}>{row.name}</span>
-          <span className="mono" style={{ fontSize: 11 }}>{row.tokenPrefix}</span>
-          <span className="mono" style={{ fontSize: 10.5 }}>{row.actorEmail}</span>
-          <span className="mono" style={{ fontSize: 11 }}>{row.active ? 'active' : 'revoked'}</span>
-          <span className="mono" style={{ fontSize: 10.5 }}>{row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleDateString() : '-'}</span>
-          <span className="mono" style={{ fontSize: 10.5 }}>
-            {new Date(row.createdAt).toLocaleDateString()} · {row.createdBy || '-'}
-          </span>
-          <button className="btn btn-primary square" onClick={() => onRevoke(row.id)} disabled={!canMutate || !row.active}>
-            REVOKE
-          </button>
-        </div>
+        <ApiTokenRow
+          key={row.id}
+          row={row}
+          canMutate={canMutate}
+          onRevoke={onRevoke}
+          onUpdate={onUpdate}
+        />
       ))}
+    </div>
+  );
+}
+
+function ApiTokenRow({
+  row,
+  canMutate,
+  onRevoke,
+  onUpdate,
+}: {
+  row: AdminApiToken;
+  canMutate: boolean;
+  onRevoke: (id: number) => Promise<void>;
+  onUpdate: (input: { id: number; name: string; actorEmail: string }) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [name, setName] = React.useState(row.name);
+  const [actorEmail, setActorEmail] = React.useState(row.actorEmail);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+  const isSaving = saveState.status === 'saving';
+  const fieldsDisabled = !canMutate || isSaving || !isEditing || !row.active;
+  const isDirty = name !== row.name || actorEmail !== row.actorEmail;
+
+  const cancel = () => {
+    setName(row.name);
+    setActorEmail(row.actorEmail);
+    setIsEditing(false);
+    setSaveState(idleSaveState);
+  };
+
+  const save = async () => {
+    if (!name.trim()) {
+      setSaveState({ status: 'error', message: 'Token name is required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(actorEmail.trim())) {
+      setSaveState({ status: 'error', message: 'Actor email must be a valid email address.' });
+      return;
+    }
+
+    setSaveState({ status: 'saving', message: 'Saving token.' });
+    try {
+      await onUpdate({ id: row.id, name, actorEmail });
+      setIsEditing(false);
+      setSaveState({ status: 'saved', message: 'Token saved.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
+
+  const revoke = async () => {
+    setSaveState({ status: 'saving', message: 'Revoking token.' });
+    try {
+      await onRevoke(row.id);
+      setIsEditing(false);
+      setSaveState({ status: 'saved', message: 'Token revoked.' });
+    } catch (err) {
+      setSaveState({ status: 'error', message: messageFromError(err) });
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.8fr 1.2fr 0.8fr 0.8fr 1fr 0.7fr', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--rule-soft)', alignItems: 'center' }}>
+      {isEditing ? (
+        <input value={name} onChange={(event) => setName(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      ) : (
+        <span style={{ fontSize: 12 }}>{row.name}</span>
+      )}
+      <span className="mono" style={isEditing ? readonlyTextStyle : { fontSize: 11 }}>{row.tokenPrefix}</span>
+      {isEditing ? (
+        <input value={actorEmail} onChange={(event) => setActorEmail(event.target.value)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
+      ) : (
+        <span className="mono" style={{ fontSize: 10.5 }}>{row.actorEmail}</span>
+      )}
+      <span className="mono" style={{ fontSize: 11 }}>{row.active ? 'active' : 'revoked'}</span>
+      <span className="mono" style={{ fontSize: 10.5 }}>{row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleDateString() : '-'}</span>
+      <span className="mono" style={{ fontSize: 10.5 }}>
+        {new Date(row.createdAt).toLocaleDateString()} · {row.createdBy || '-'}
+      </span>
+      <div style={rowActionStyle}>
+        {isEditing ? (
+          <>
+            <button className="btn btn-citrus square" onClick={() => void save()} disabled={!canMutate || isSaving || !isDirty || !row.active}>
+              SAVE
+            </button>
+            <button className="btn btn-ghost square" onClick={cancel} disabled={isSaving}>
+              CANCEL
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-primary square" onClick={() => setIsEditing(true)} disabled={!canMutate || isSaving || !row.active}>
+              EDIT
+            </button>
+            <button className="btn btn-primary square" onClick={() => void revoke()} disabled={!canMutate || isSaving || !row.active}>
+              REVOKE
+            </button>
+          </>
+        )}
+        <ActionStatus state={saveState} />
+      </div>
     </div>
   );
 }
@@ -931,20 +1331,33 @@ function DocumentImportPanel({
   const [sourceName, setSourceName] = React.useState('');
   const [text, setText] = React.useState('');
   const [isUploading, setIsUploading] = React.useState(false);
+  const [fileInputKey, setFileInputKey] = React.useState(0);
+  const [saveState, setSaveState] = React.useState<SaveState>(idleSaveState);
+
+  const reset = () => {
+    setFile(null);
+    setSourceName('');
+    setText('');
+    setFileInputKey((key) => key + 1);
+    setSaveState(idleSaveState);
+  };
 
   const submit = async () => {
     if (!canMutate) {
       onStatus('set DATABASE_URL to import documents');
+      setSaveState({ status: 'error', message: 'Connect a database before importing.' });
       return;
     }
 
     if (!file && !text.trim()) {
       onStatus('choose a file or paste inventory rows');
+      setSaveState({ status: 'error', message: 'Choose a file or paste inventory rows.' });
       return;
     }
 
     setIsUploading(true);
     onStatus('uploading inventory document');
+    setSaveState({ status: 'saving', message: 'Requesting import.' });
     try {
       const formData = new FormData();
       if (file) formData.set('file', file);
@@ -958,12 +1371,13 @@ function DocumentImportPanel({
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Could not request document import');
 
-      setFile(null);
-      setSourceName('');
-      setText('');
+      reset();
+      setSaveState({ status: 'saved', message: 'Document import requested.' });
       onRequested();
     } catch (err) {
-      onStatus(err instanceof Error ? err.message : String(err));
+      const message = messageFromError(err);
+      onStatus(message);
+      setSaveState({ status: 'error', message });
     } finally {
       setIsUploading(false);
     }
@@ -978,11 +1392,12 @@ function DocumentImportPanel({
         <div>
           <div className="mono" style={labelStyle}>CSV / TEXT FILE</div>
           <input
+            key={fileInputKey}
             type="file"
             accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
             disabled={!canMutate || isUploading || isPending}
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            style={inputStyle}
+            style={fieldStyle(!canMutate || isUploading || isPending)}
           />
         </div>
         <LabeledInput
@@ -992,9 +1407,17 @@ function DocumentImportPanel({
           disabled={!canMutate || isUploading || isPending}
           placeholder="Swag inventory export"
         />
-        <button className="btn btn-citrus square" onClick={() => void submit()} disabled={!canMutate || isUploading || isPending}>
-          {isUploading ? 'REQUESTING' : 'IMPORT DOC'}
-        </button>
+        <div style={rowActionStyle}>
+          <button className="btn btn-citrus square" onClick={() => void submit()} disabled={!canMutate || isUploading || isPending}>
+            {isUploading ? 'REQUESTING' : 'IMPORT DOC'}
+          </button>
+          {(file || sourceName || text) && (
+            <button className="btn btn-ghost square" onClick={reset} disabled={isUploading}>
+              CANCEL
+            </button>
+          )}
+          <ActionStatus state={saveState} />
+        </div>
       </div>
       <div style={{ padding: '12px 0 18px', borderBottom: '1px solid var(--rule-soft)' }}>
         <div className="mono" style={labelStyle}>PASTE ROWS</div>
@@ -1002,27 +1425,13 @@ function DocumentImportPanel({
           value={text}
           onChange={(event) => setText(event.target.value)}
           disabled={!canMutate || isUploading || isPending}
-          placeholder={'item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58'}
+          placeholder={'item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58\nDurable Workflow Hoodie,8,14,16,11,5,\nMoss Ops Cap,42,,,,,\nWorkflow Sticker Pack,120,,,,,'}
           rows={4}
-          style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+          style={{ ...fieldStyle(!canMutate || isUploading || isPending), resize: 'vertical', lineHeight: 1.5 }}
         />
       </div>
     </div>
   );
-}
-
-function refreshingStatusChange(
-  startTransition: (callback: () => void) => void,
-  refresh: () => void,
-) {
-  return (orderId: string, status: OrderStatus, tracking: string, notes: string) => {
-    startTransition(() => {
-      void (async () => {
-        await updateOrderStatusAction({ orderId, status, tracking, notes });
-        refresh();
-      })();
-    });
-  };
 }
 
 function HeaderGrid({ columns, labels }: { columns: string; labels: string[] }) {
@@ -1037,6 +1446,33 @@ function EmptyState({ label }: { label: string }) {
   return (
     <div className="mono" style={{ padding: '32px 0', color: 'var(--muted)', fontSize: 12 }}>
       {label}
+    </div>
+  );
+}
+
+function ActionStatus({ state }: { state: SaveState }) {
+  if (state.status === 'idle') return null;
+
+  const color =
+    state.status === 'error'
+      ? 'var(--citrus)'
+      : state.status === 'saved'
+        ? 'var(--matcha)'
+        : 'var(--muted)';
+
+  return (
+    <div
+      className="mono"
+      role={state.status === 'error' ? 'alert' : 'status'}
+      style={{
+        fontSize: 10.5,
+        lineHeight: 1.45,
+        color,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+      }}
+    >
+      {state.message ?? state.status}
     </div>
   );
 }
@@ -1075,11 +1511,58 @@ function LabeledInput({
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
         placeholder={placeholder}
-        style={inputStyle}
+        style={fieldStyle(disabled)}
       />
     </div>
   );
 }
+
+function messageFromError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function parseMoneyInput(value: string): number {
+  return Number(String(value).replace(/[$,\s]/g, ''));
+}
+
+function discountValue(row: AdminDiscountCode): string {
+  return row.type === 'amount_off'
+    ? ((row.amountOffCents ?? 0) / 100).toFixed(2)
+    : String(row.percentOff ?? 0);
+}
+
+function fieldStyle(disabled?: boolean): React.CSSProperties {
+  if (!disabled) return inputStyle;
+
+  return {
+    ...inputStyle,
+    background: 'var(--bone)',
+    color: 'var(--muted)',
+    border: '1px solid var(--rule-soft)',
+    cursor: 'not-allowed',
+  };
+}
+
+const readonlyTextStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  minHeight: 34,
+  width: '100%',
+  minWidth: 0,
+  border: '1px solid var(--rule-soft)',
+  background: 'var(--bone)',
+  color: 'var(--muted)',
+  padding: '8px 10px',
+  fontFamily: 'JetBrains Mono, monospace',
+  fontSize: 11,
+};
+
+const rowActionStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+  alignItems: 'center',
+};
 
 const labelStyle: React.CSSProperties = {
   fontSize: 10.5,

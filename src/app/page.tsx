@@ -111,10 +111,10 @@ function CatalogGrid({ products }: { products: Product[] }) {
         num="2.0"
         title="THE CATALOG"
         blurb="The orderable office inventory from the Swag Inventory page. Railway Postgres is the live backend; Inngest reserves stock during fulfillment."
-        items={[
-          { idx: '2.1', label: 'ANTI ANTI INFRA CO. TEE' },
-          { idx: '2.2', label: 'STEP.RUN SOCKS' },
-        ]}
+        items={products.slice(0, 5).map((product, index) => ({
+          idx: `2.${index + 1}`,
+          label: product.name.toUpperCase(),
+        }))}
       />
       <div className="editorial-grid">
         {products.map((p, i) => (

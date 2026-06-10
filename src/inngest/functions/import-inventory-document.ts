@@ -7,6 +7,7 @@ import {
   parseInventoryDocument,
   type InventoryImportReview,
 } from '@/lib/inventory-import';
+import { PRODUCTS } from '@/lib/catalog';
 
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -154,18 +155,7 @@ async function reviewInventoryWithLlm({
       input: JSON.stringify({
         sourceName,
         contentType,
-        expectedCatalog: [
-          {
-            product: 'Anti Anti Infra Co.',
-            sku: 'INN-AAI-TEE',
-            requiredSizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
-          },
-          {
-            product: 'Step.run Socks',
-            sku: 'INN-STEP-SOCKS',
-            requiredSizes: ['ONE_SIZE'],
-          },
-        ],
+        expectedCatalog: expectedCatalogForReview(),
         parsedRows,
         deterministicReview: deterministic,
       }),
@@ -184,6 +174,20 @@ async function reviewInventoryWithLlm({
   });
 
   return parseLlmReview(response, deterministic);
+}
+
+function expectedCatalogForReview() {
+  return PRODUCTS.map((product) => {
+    const requiredSizes = Array.from(
+      new Set(product.variants.flatMap((variant) => (variant.size ? [variant.size] : []))),
+    );
+
+    return {
+      product: product.name,
+      sku: product.sku,
+      requiredSizes: requiredSizes.length > 0 ? requiredSizes : ['ONE_SIZE'],
+    };
+  });
 }
 
 function parseLlmReview(response: unknown, fallback: InventoryImportReview): InventoryImportReview {

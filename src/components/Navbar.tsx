@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
+import { Show, SignInButton, SignUpButton, UserButton, useUser } from '@clerk/nextjs';
 import { useCart } from '@/lib/cart-context';
 import { Logo } from './atoms/brand-marks';
 
@@ -47,10 +47,32 @@ export function Navbar() {
     lastCount.current = itemCount;
   }, [itemCount]);
 
+  // Admin tab is allowlist-gated: the server decides (/api/admin/me returns a
+  // bare boolean), re-checked whenever the Clerk session changes. Customers
+  // never see it; admins get it back in the nav.
+  const { user, isLoaded } = useUser();
+  const [isAdmin, setIsAdmin] = React.useState(false);
+  React.useEffect(() => {
+    if (!isLoaded) return;
+    let cancelled = false;
+    fetch('/api/admin/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { isAdmin: false }))
+      .then((d) => {
+        if (!cancelled) setIsAdmin(Boolean(d.isAdmin));
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, user?.id]);
+
   const links: Array<{ id: string; label: string; href: string; external?: boolean }> = [
     { id: 'catalog', label: 'Catalog', href: '/#catalog-grid' },
     { id: 'docs', label: 'Inngest Docs', href: 'https://www.inngest.com/docs', external: true },
     { id: 'discord', label: 'Inngest Discord', href: 'https://www.inngest.com/discord', external: true },
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin', href: '/admin' }] : []),
   ];
 
   return (

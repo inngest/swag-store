@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { inngest } from '@/inngest/client';
 import { requireApiActor } from '@/lib/api-auth';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { listAutomationProducts } from '@/lib/order-automation';
 import { resolveProductImageInput } from '@/lib/product-images';
 import {
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       id: `inventory-changed-api-product-${product.id}-${Date.now()}`,
       name: 'store/inventory.changed',
       data: {
+        appOrigin: APP_ORIGIN,
         source: 'api-product-upsert',
         reason: 'API created or updated product inventory',
         actorEmail: actor.email,

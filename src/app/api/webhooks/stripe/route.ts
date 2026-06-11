@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { inngest } from '@/inngest/client';
 
 export async function POST(req: NextRequest) {
@@ -26,6 +27,17 @@ export async function POST(req: NextRequest) {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+
+    // Both deployments (Railway prod + Vercel QA) share one Stripe test
+    // account, so every webhook is delivered to both apps. Only process
+    // sessions this app created. Sessions without the metadata (legacy)
+    // process normally.
+    const sessionOrigin = session.metadata?.appOrigin;
+    if (sessionOrigin && sessionOrigin !== APP_ORIGIN) {
+      console.log('[stripe-webhook] ignoring foreign session', session.id, 'origin', sessionOrigin);
+      return NextResponse.json({ received: true, ignored: 'foreign appOrigin' });
+    }
+
     const orderId = session.metadata?.orderId ?? session.id;
 
     const lineItems = await getStripe().checkout.sessions.listLineItems(session.id, {
@@ -46,6 +58,7 @@ export async function POST(req: NextRequest) {
       id: `order-placed-${session.id}`,
       name: 'store/order.placed',
       data: {
+        appOrigin: APP_ORIGIN,
         orderId,
         stripeSessionId: session.id,
         stripePaymentIntentId:

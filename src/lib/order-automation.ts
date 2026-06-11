@@ -1,4 +1,5 @@
 import { inngest } from '@/inngest/client';
+import { APP_ORIGIN } from './app-origin';
 import { getCheckoutSubtotalCents, normalizeCheckoutItems, type CheckoutCartItem } from './checkout';
 import { runSwagCodeAgent, runSwagCodeAgentBatch, type SwagCodeAgentKind } from './discount-code-agent';
 import { getStripe } from './stripe';
@@ -284,6 +285,7 @@ export async function submitAutomatedOrder({
     id: `api-order-placed-${orderId}`,
     name: 'store/order.placed',
     data: {
+      appOrigin: APP_ORIGIN,
       orderId,
       stripeSessionId,
       encrypted: {
@@ -482,6 +484,9 @@ async function createStripeCheckoutSession({
     ...(customerEmail ? { customer_email: customerEmail } : {}),
     metadata: {
       orderId,
+      // Tags the session with the app that created it so the shared Stripe
+      // webhook can ignore sessions belonging to the other deployment.
+      appOrigin: APP_ORIGIN,
       discountCode: appliedDiscount?.code ?? '',
       discountAmountCents: appliedDiscount ? String(appliedDiscount.discountCents) : '',
     },

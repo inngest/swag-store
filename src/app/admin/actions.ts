@@ -4,6 +4,7 @@ import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { adminChannel } from '@/inngest/channels';
 import { requireAdmin } from '@/lib/admin-auth';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { runSwagCodeAgent, type SwagCodeAgentKind } from '@/lib/discount-code-agent';
 import { saveProductImage } from '@/lib/product-images';
 import { normalizeProductInput, type ProductUpsertInput } from '@/lib/product-management';
@@ -86,6 +87,7 @@ export async function updateInventoryAction(input: {
     id: `inventory-changed-admin-${input.variantId}-${Date.now()}`,
     name: 'store/inventory.changed',
     data: {
+      appOrigin: APP_ORIGIN,
       source: 'admin-inventory-edit',
       reason: 'Admin manually updated inventory',
       actorEmail: admin.email,
@@ -103,6 +105,7 @@ export async function upsertProductAction(input: ProductUpsertInput) {
     id: `inventory-changed-product-${product.id}-${Date.now()}`,
     name: 'store/inventory.changed',
     data: {
+      appOrigin: APP_ORIGIN,
       source: 'admin-product-upsert',
       reason: 'Admin created or updated product inventory',
       actorEmail: admin.email,
@@ -140,6 +143,7 @@ export async function requestInventoryImportAction() {
     id: `inventory-import-${Date.now()}`,
     name: 'admin/inventory.import.requested',
     data: {
+      appOrigin: APP_ORIGIN,
       actorEmail: admin.email,
     },
   });
@@ -161,6 +165,7 @@ export async function updateOrderStatusAction(input: {
     name: 'admin/order.status_update.requested',
     data: {
       ...input,
+      appOrigin: APP_ORIGIN,
       actorEmail: admin.email,
     },
   });

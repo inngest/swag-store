@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { inngest } from '@/inngest/client';
 import { requireAdmin } from '@/lib/admin-auth';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { isStoreDatabaseEnabled } from '@/lib/store-db';
 
 export const runtime = 'nodejs';
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
       id: `inventory-document-import-${eventId}`,
       name: 'admin/inventory.document_import.requested',
       data: {
+        appOrigin: APP_ORIGIN,
         actorEmail: admin.email,
         sourceName: filename,
         contentType,

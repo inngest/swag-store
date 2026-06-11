@@ -1,6 +1,7 @@
 import { openaiResponses } from '@inngest/ai/models';
 import { inngest } from '../client';
 import { adminChannel } from '../channels';
+import { APP_ORIGIN, originTrigger } from '@/lib/app-origin';
 import {
   deterministicReview,
   importInventoryRows,
@@ -51,7 +52,7 @@ export const importInventoryDocument = inngest.createFunction(
     name: 'Import Inventory Document',
     retries: 2,
     concurrency: 1,
-    triggers: [{ event: 'admin/inventory.document_import.requested' }],
+    triggers: [originTrigger('admin/inventory.document_import.requested')],
   },
   async ({ event, step }) => {
     const data = event.data as {
@@ -101,6 +102,7 @@ export const importInventoryDocument = inngest.createFunction(
         id: `inventory-changed-document-import-${result.importRunId}`,
         name: 'store/inventory.changed',
         data: {
+          appOrigin: APP_ORIGIN,
           source: 'inventory-document-import',
           reason: `Inventory document import completed: ${data.sourceName ?? 'document'}`,
           importRunId: result.importRunId,

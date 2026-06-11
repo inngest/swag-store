@@ -2,6 +2,7 @@ import { isEncryptedValue } from '@inngest/middleware-encryption';
 import { LibSodiumEncryptionService } from '@inngest/middleware-encryption/strategies/libSodium';
 import { inngest } from '../client';
 import { orderChannel, adminChannel } from '../channels';
+import { APP_ORIGIN, originTrigger } from '@/lib/app-origin';
 import { getStripe } from '@/lib/stripe';
 import { isOrderEmailConfigured, sendOrderConfirmationEmail } from '@/lib/email';
 import { sendOrderFulfillmentFailureSlackMessage } from '@/lib/slack';
@@ -63,7 +64,7 @@ export const fulfillOrder = inngest.createFunction(
     id: 'fulfill-order',
     name: 'Fulfill Order',
     retries: 3,
-    triggers: [{ event: 'store/order.placed' }],
+    triggers: [originTrigger('store/order.placed')],
     // Safety net: the customer has (usually) already been charged by the time
     // this function runs, so a permanently failed run must never silently drop
     // the order. Park it in the pending queue, refund the payment, and alert.
@@ -333,6 +334,7 @@ export const fulfillOrder = inngest.createFunction(
       id: `inventory-changed-order-${orderId}`,
       name: 'store/inventory.changed',
       data: {
+        appOrigin: APP_ORIGIN,
         source: 'order-fulfillment',
         reason: 'Inventory reserved for order fulfillment',
         orderId,

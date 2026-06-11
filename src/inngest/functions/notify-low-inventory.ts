@@ -1,4 +1,5 @@
 import { inngest } from '../client';
+import { originTrigger } from '@/lib/app-origin';
 import {
   listLowStockInventory,
   recordLowStockNotificationCandidates,
@@ -11,7 +12,7 @@ export const notifyLowInventory = inngest.createFunction(
     name: 'Notify Low Inventory',
     retries: 3,
     triggers: [
-      { event: 'store/inventory.changed' },
+      originTrigger('store/inventory.changed'),
       { cron: 'TZ=America/Los_Angeles 0 9 * * *' },
     ],
   },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { inngest } from '@/inngest/client';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { authorizeSharedSecret } from '@/lib/secret-auth';
 import { resetStoreInventoryFromCatalog } from '@/lib/store-db';
 
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
       id: `inventory-changed-reset-${result.importRunId}`,
       name: 'store/inventory.changed',
       data: {
+        appOrigin: APP_ORIGIN,
         source: 'inventory-reset',
         reason: 'Inventory reset from catalog',
         importRunId: result.importRunId,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { inngest } from '@/inngest/client';
+import { APP_ORIGIN } from '@/lib/app-origin';
 import { requireApiActor } from '@/lib/api-auth';
 import { wwwAuthenticateHeader } from '@/lib/auth-md';
 import {
@@ -784,6 +785,7 @@ async function callTool(
       id: `inventory-changed-mcp-adjustment-${result.batchId}`,
       name: 'store/inventory.changed',
       data: {
+        appOrigin: APP_ORIGIN,
         source: 'mcp-inventory-update',
         reason: stringArg(args.reason) ?? 'MCP inventory update',
         actorEmail,
@@ -839,6 +841,7 @@ async function callTool(
       id: `inventory-changed-mcp-product-${product.id}-${Date.now()}`,
       name: 'store/inventory.changed',
       data: {
+        appOrigin: APP_ORIGIN,
         source: 'mcp-product-upsert',
         reason: 'MCP created or updated product inventory',
         actorEmail,

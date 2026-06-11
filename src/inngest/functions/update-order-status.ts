@@ -1,6 +1,7 @@
 import { NonRetriableError } from 'inngest';
 import { inngest } from '../client';
 import { adminChannel, orderChannel } from '../channels';
+import { originTrigger } from '@/lib/app-origin';
 import { isOrderStatus, updateOrderStatus, type OrderStatus } from '@/lib/store-db';
 
 export const updateOrderStatusFunction = inngest.createFunction(
@@ -8,7 +9,7 @@ export const updateOrderStatusFunction = inngest.createFunction(
     id: 'update-order-status',
     name: 'Update Order Status',
     retries: 2,
-    triggers: [{ event: 'admin/order.status_update.requested' }],
+    triggers: [originTrigger('admin/order.status_update.requested')],
   },
   async ({ event, step }) => {
     const data = event.data as {

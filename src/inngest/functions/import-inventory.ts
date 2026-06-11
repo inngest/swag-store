@@ -1,5 +1,6 @@
 import { inngest } from '../client';
 import { adminChannel } from '../channels';
+import { APP_ORIGIN, originTrigger } from '@/lib/app-origin';
 import { importInventorySheet } from '@/lib/inventory-import';
 
 export const importInventory = inngest.createFunction(
@@ -7,7 +8,7 @@ export const importInventory = inngest.createFunction(
     id: 'import-inventory',
     name: 'Import Inventory',
     retries: 2,
-    triggers: [{ event: 'admin/inventory.import.requested' }],
+    triggers: [originTrigger('admin/inventory.import.requested')],
   },
   async ({ event, step }) => {
     const data = event.data as {
@@ -36,6 +37,7 @@ export const importInventory = inngest.createFunction(
         id: `inventory-changed-import-${result.importRunId}`,
         name: 'store/inventory.changed',
         data: {
+          appOrigin: APP_ORIGIN,
           source: 'inventory-sheet-import',
           reason: 'Inventory sheet import completed',
           importRunId: result.importRunId,

@@ -6,19 +6,21 @@ export type AdminUser = {
 };
 
 export async function getAdminUser(): Promise<AdminUser | null> {
-  const e2eAdmin = getE2eAdminUser();
-  if (e2eAdmin) return e2eAdmin;
+  // A real signed-in session always wins: evaluate the actual user against
+  // the allowlist, so a non-allowlisted login is denied even when the local
+  // E2E bypass is enabled. The bypass only covers the no-session (headless
+  // test) case — it must never mask who is actually logged in.
+  if (process.env.CLERK_SECRET_KEY) {
+    const session = await auth();
+    if (session.userId) {
+      const user = await currentUser();
+      const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? '';
+      if (!isAllowedAdminEmail(email)) return null;
+      return { userId: session.userId, email };
+    }
+  }
 
-  if (!process.env.CLERK_SECRET_KEY) return null;
-
-  const session = await auth();
-  if (!session.userId) return null;
-
-  const user = await currentUser();
-  const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? '';
-  if (!isAllowedAdminEmail(email)) return null;
-
-  return { userId: session.userId, email };
+  return getE2eAdminUser();
 }
 
 export async function requireAdmin(): Promise<AdminUser> {

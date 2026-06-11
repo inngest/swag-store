@@ -73,7 +73,10 @@ export async function sendOrderConfirmationEmail(
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.ORDER_EMAIL_FROM;
   if (!apiKey || !from) {
-    return { sent: false, skipped: 'RESEND_API_KEY not configured' };
+    const missing = [!apiKey && 'RESEND_API_KEY', !from && 'ORDER_EMAIL_FROM']
+      .filter(Boolean)
+      .join(' + ');
+    return { sent: false, skipped: `${missing} not configured` };
   }
 
   const res = await fetch('https://api.resend.com/emails', {

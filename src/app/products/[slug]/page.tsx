@@ -82,13 +82,6 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 <span>{product.fit}</span>
               </span>
             </div>
-            <div className="meta-row mono">
-              <span className="plus">+</span>
-              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--muted)' }}>SHIPS IN</span>
-                <span>3—5 BUSINESS DAYS</span>
-              </span>
-            </div>
             <div className="meta-row mono" style={{ borderBottom: 'none' }}>
               <span className="plus">+</span>
               <span style={{ display: 'flex', justifyContent: 'space-between' }}>

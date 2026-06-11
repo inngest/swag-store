@@ -128,7 +128,7 @@ export const PRODUCTS: Product[] = [
     tagline: 'Step.run, but make it wearable.',
     blurb: 'One-size Step.run socks from the office inventory shelf.',
     description:
-      'Step.run socks for customers, community, and prospects. This stock count comes from the current Swag Inventory page and is reserved through the same Railway-backed fulfillment flow.',
+      'Step.run socks for customers, community, and prospects. This stock count comes from the current Swag Inventory page and is reserved automatically during fulfillment.',
     fabric: 'Cotton blend knit',
     fit: 'One size',
     cornerTag: '02 / SOCK',

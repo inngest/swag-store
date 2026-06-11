@@ -1979,7 +1979,7 @@ function normalizeDiscountCodePrefix(prefix: string): string {
 }
 
 function randomCodeSuffix(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const bytes = randomBytes(8);
   let suffix = '';
   for (const byte of bytes) {

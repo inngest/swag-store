@@ -6,6 +6,7 @@ import { getStripe } from '@/lib/stripe';
 import { isOrderEmailConfigured, sendOrderConfirmationEmail } from '@/lib/email';
 import { sendOrderFulfillmentFailureSlackMessage } from '@/lib/slack';
 import {
+  fetchOrder,
   isStoreDatabaseEnabled,
   recordDiscountRedemption,
   recordPendingOrder,
@@ -94,6 +95,35 @@ export const fulfillOrder = inngest.createFunction(
         .join(', ');
 
       const needsAttentionNote = `NEEDS ATTENTION: fulfillment failed after retries — ${failureReason}. Inventory NOT reserved; review before shipping.`;
+
+      // If an order row already exists, another consumer (or a later step of
+      // this run) recorded it successfully. Overwriting it would erase good
+      // PII, and refunding would claw back a fulfilled order. Alert only.
+      const existingOrder = await step.run('check-existing-order', async () => {
+        if (!isStoreDatabaseEnabled()) return null;
+        const existing = await fetchOrder(orderId);
+        return existing ? { status: existing.status ?? 'pending' } : null;
+      });
+
+      if (existingOrder) {
+        await step.realtime.publish('publish-admin-duplicate-failure', adminChannel.order, {
+          orderId,
+          amount: amountTotal,
+          currency,
+          items: (lineItems ?? []).map((li) => ({
+            name: li.productName ?? li.description ?? 'item',
+            quantity: li.quantity ?? 1,
+          })),
+          step: 'fulfillment-failed-duplicate',
+          status: 'failed',
+          ts: Date.now(),
+        });
+        return {
+          orderId,
+          skipped: 'order already recorded by a successful run; no overwrite, no refund',
+          failureReason,
+        };
+      }
 
       await step.run('record-failed-order', async () => {
         return recordPendingOrder({
@@ -316,10 +346,14 @@ export const fulfillOrder = inngest.createFunction(
         return { sent: false as const, skipped: 'no customer email on order' };
       }
       if (!isOrderEmailConfigured()) {
-        console.log(
-          `[fulfill-order] send-confirmation skipped for ${orderId}: RESEND_API_KEY not configured`,
-        );
-        return { sent: false as const, skipped: 'RESEND_API_KEY not configured' };
+        const missing = [
+          !process.env.RESEND_API_KEY && 'RESEND_API_KEY',
+          !process.env.ORDER_EMAIL_FROM && 'ORDER_EMAIL_FROM',
+        ]
+          .filter(Boolean)
+          .join(' + ');
+        console.log(`[fulfill-order] send-confirmation skipped for ${orderId}: ${missing} not configured`);
+        return { sent: false as const, skipped: `${missing} not configured` };
       }
       try {
         return await sendOrderConfirmationEmail({

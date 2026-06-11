@@ -26,7 +26,10 @@ function isAdminE2eBypassEnabled(): boolean {
 
 export const config = {
   matcher: [
-    '/((?!api|_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Clerk context must cover /api too: admin API routes call auth() inside
+    // requireAdmin, which throws outside clerkMiddleware coverage. The
+    // handler above still only gates /admin pages — API routes pass through.
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     '/__clerk/(.*)',
   ],
 };

@@ -51,6 +51,20 @@ Never skip states, and never edit order rows in the database directly.
 - Agents can set images too: `/api/ai/products` and the MCP `upsert_product` tool accept `imageSourceUrl` (an https link the server fetches) or `imageBase64`.
 - Uploaded images are stored in the database and served from `/api/product-images/…` — no separate hosting to manage.
 
+## 4c. Importing new products
+
+The canonical path for adding products to the store:
+
+1. **Riley** fills out the **"Swag Store Upload"** tab in the swag tracking Google Sheet (one row per product: Name, SKU, SLUG, TYPE, PRICE, CATEGORY, COVER, IMAGE PLACEHOLDER, TAGLINE, CARD BLURB, FABRIC, FIT, CORNER TAG, TAGS, DESCRIPTION, COLORS, SIZES) and drops product images in the shared Drive folder. Image **filenames must match the COVER column** exactly (PNG/JPG/WebP, max 4MB).
+2. **Sterling/MARVIN** exports the sheet tab to a TSV/CSV, downloads the images to a local directory, and runs the importer:
+   ```
+   node scripts/import-products-from-sheet.mjs \
+     --base-url <store url> --token <API token> \
+     --csv <sheet export> --images <image dir>
+   ```
+   The script upserts each row via `/api/ai/products` (idempotent — rerun after fixing the sheet and it updates in place), prints a per-product result table, and flags rows with missing images or missing sheet fields. Use `--dry-run` to preview payloads.
+3. **Stock arrives separately.** Imported variants start at stock 0; when the physical shipment lands, use the receive-shipment flow in `/admin` → Inventory (audited). The script's `--stock-overrides` flag exists only for one-off stock migrations.
+
 ## 5. API tokens (for automations/agents)
 
 `/admin` → **API Tokens** — generate revocable tokens for `/api/ai/products`, `/api/ai/discount-codes`, `/api/ai/orders`, and `/api/mcp`. The token is shown once at creation. Revoke from the same screen; revocation is immediate.

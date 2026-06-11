@@ -312,8 +312,13 @@ async function testDiscounts() {
 
   await page.getByPlaceholder('SALES100').fill(manualCode);
   await page.getByPlaceholder('Sales credit').fill(`E2E manual ${runId}`);
-  await page.locator('select').first().selectOption('percent_off');
-  await page.getByPlaceholder('100', { exact: true }).fill('15');
+  // Scope to the manual-code panel: the EVENT CODES batch section has its own
+  // type select and a second placeholder="100" input.
+  const manualPanel = page
+    .getByPlaceholder('SALES100')
+    .locator('xpath=ancestor::div[.//button[normalize-space()="ADD SINGLE-USE CODE"]][1]');
+  await manualPanel.locator('select').first().selectOption('percent_off');
+  await manualPanel.getByPlaceholder('100', { exact: true }).fill('15');
   await clickButton('ADD SINGLE-USE CODE');
   await expectVisible(page.getByText(manualCode, { exact: true }), 'manual discount listed');
 

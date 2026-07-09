@@ -16,10 +16,26 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+
+    // Live-store guardrail: in production this endpoint refuses to run
+    // without an explicit confirmation string, and destructive behavior
+    // (overwriting live stock, deleting non-catalog products) is opt-in
+    // per call rather than the default.
+    if (process.env.NODE_ENV === 'production' && body.confirm !== 'RESET-LIVE-STORE') {
+      return NextResponse.json(
+        { error: 'Refusing to reset a production store without { "confirm": "RESET-LIVE-STORE" }.' },
+        { status: 400 },
+      );
+    }
+
     const actorEmail = typeof body.actorEmail === 'string'
       ? body.actorEmail
       : process.env.SWAG_STORE_API_ACTOR_EMAIL ?? 'railway-reset@inngest.com';
-    const result = await resetStoreInventoryFromCatalog({ actorEmail });
+    const result = await resetStoreInventoryFromCatalog({
+      actorEmail,
+      overwriteStock: body.overwriteStock === true,
+      deleteUnknownProducts: body.deleteUnknownProducts === true,
+    });
     await inngest.send({
       id: `inventory-changed-reset-${result.importRunId}`,
       name: 'store/inventory.changed',

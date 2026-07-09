@@ -17,8 +17,22 @@ import {
   fetchPublicOrders as fetchSheetPublicOrders,
 } from './sheets';
 
-export const ORDER_STATUSES = ['pending', 'fulfilled', 'shipped'] as const;
+export const ORDER_STATUSES = ['pending', 'fulfilled', 'shipped', 'cancelled'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+// Forward-only lifecycle plus cancellation. Shipped orders cannot be
+// cancelled in place (that's a return, handled manually); cancelled is
+// terminal. Same-status writes are allowed so note/tracking updates work.
+const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
+  pending: ['fulfilled', 'cancelled'],
+  fulfilled: ['shipped', 'cancelled'],
+  shipped: [],
+  cancelled: [],
+};
+
+export function canTransitionOrderStatus(from: OrderStatus, to: OrderStatus): boolean {
+  return from === to || ORDER_STATUS_TRANSITIONS[from].includes(to);
+}
 export type DiscountCodeType = 'amount_off' | 'percent_off';
 
 export function isOrderStatus(value: unknown): value is OrderStatus {
@@ -282,9 +296,9 @@ async function ensureStoreSchema(): Promise<void> {
     alter table orders add column if not exists discount_code text not null default '';
     alter table orders add column if not exists discount_amount_cents integer not null default 0;
 
-    update orders set status = 'pending' where status not in ('pending', 'fulfilled', 'shipped');
+    update orders set status = 'pending' where status not in ('pending', 'fulfilled', 'shipped', 'cancelled');
     alter table orders drop constraint if exists orders_status_check;
-    alter table orders add constraint orders_status_check check (status in ('pending', 'fulfilled', 'shipped'));
+    alter table orders add constraint orders_status_check check (status in ('pending', 'fulfilled', 'shipped', 'cancelled'));
 
     create table if not exists order_items (
       id bigserial primary key,
@@ -331,8 +345,31 @@ async function ensureStoreSchema(): Promise<void> {
       constraint inventory_adjustments_mode_check check (mode in ('receive_shipment', 'audit_count', 'manual_correction'))
     );
 
+    alter table inventory_adjustments drop constraint if exists inventory_adjustments_mode_check;
+    alter table inventory_adjustments add constraint inventory_adjustments_mode_check
+      check (mode in ('receive_shipment', 'audit_count', 'manual_correction', 'order_reservation', 'order_release'));
+
     create index if not exists inventory_adjustments_batch_idx on inventory_adjustments (batch_id);
     create index if not exists inventory_adjustments_variant_idx on inventory_adjustments (variant_id, created_at desc);
+
+    -- One row per variant reserved for an order. Written in the same
+    -- transaction as the stock decrement, so its presence is proof the
+    -- decrement committed: reserveInventory uses it to stay idempotent across
+    -- step retries, and releaseOrderReservations uses it to restock exactly
+    -- once on failure/cancellation.
+    create table if not exists order_reservations (
+      order_id text not null,
+      variant_id text not null,
+      quantity integer not null,
+      sku text not null default '',
+      name text not null default '',
+      size text not null default '',
+      color text not null default '',
+      created_at timestamptz not null default now(),
+      released_at timestamptz,
+      release_reason text not null default '',
+      primary key (order_id, variant_id)
+    );
 
     create table if not exists low_stock_notifications (
       variant_id text primary key,
@@ -876,6 +913,7 @@ export async function validateCartAvailability(
 }
 
 export async function reserveInventory({
+  orderId,
   lineItems,
 }: {
   orderId: string;
@@ -901,6 +939,33 @@ export async function reserveInventory({
   const reservations: InventoryReservation[] = [];
   try {
     await client.query('begin');
+
+    // Idempotency guard: if reservation rows for this order already exist,
+    // a previous attempt committed but its ack never reached Inngest (or a
+    // duplicate event slipped through). Replay the recorded reservations
+    // instead of decrementing stock a second time.
+    const existing = await client.query(
+      `select variant_id, quantity, sku, name, size, color, created_at
+       from order_reservations
+       where order_id = $1`,
+      [orderId],
+    );
+    if (existing.rows.length > 0) {
+      await client.query('commit');
+      const replayed = existing.rows.map((row) => ({
+        sku: String(row.sku),
+        name: String(row.name),
+        variantId: String(row.variant_id),
+        size: String(row.size ?? ''),
+        color: String(row.color ?? ''),
+        quantity: Number(row.quantity),
+        stockAfter: null,
+        reservedAt: new Date(row.created_at).toISOString(),
+      }));
+      return { reservations: replayed, count: replayed.length };
+    }
+
+    const batchId = `res_${orderId}`;
     for (const item of lineItems ?? []) {
       const quantity = item.quantity ?? 1;
       const variant = await findVariantForUpdate(client, item);
@@ -920,6 +985,27 @@ export async function reserveInventory({
          returning stock`,
         [quantity, variant.id],
       );
+      const stockAfter = Number(updated.rows[0]?.stock ?? 0);
+
+      await client.query(
+        `insert into order_reservations (order_id, variant_id, quantity, sku, name, size, color)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
+        [orderId, variant.id, quantity, variant.sku, item.productName ?? item.description ?? variant.name,
+          item.size ?? variant.size ?? '', item.color ?? variant.color ?? ''],
+      );
+
+      // Sale decrements land in the same audit ledger as manual adjustments,
+      // so "why did stock drop" has one answer surface.
+      await client.query(
+        `insert into inventory_adjustments (
+           batch_id, actor_email, source, reason, mode, product_id, product_name,
+           sku, variant_id, size, color, previous_stock, quantity_change, new_stock, note
+         )
+         values ($1, $2, $3, $4, 'order_reservation', '', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [batchId, 'system:fulfill-order', 'order-fulfillment', `Reserved for order ${orderId}`,
+          variant.name, variant.sku, variant.id, item.size ?? variant.size ?? '',
+          item.color ?? variant.color ?? '', variant.stock, -quantity, stockAfter, orderId],
+      );
 
       reservations.push({
         sku: variant.sku,
@@ -928,7 +1014,7 @@ export async function reserveInventory({
         size: item.size ?? variant.size ?? '',
         color: item.color ?? variant.color ?? '',
         quantity,
-        stockAfter: Number(updated.rows[0]?.stock ?? 0),
+        stockAfter,
         reservedAt,
       });
     }
@@ -941,6 +1027,81 @@ export async function reserveInventory({
   }
 
   return { reservations, count: reservations.length };
+}
+
+// Puts an order's reserved units back into stock — the compensation path for
+// failed fulfillments and cancellations. Idempotent: only rows with
+// released_at IS NULL are restocked, and they're flipped in the same
+// transaction, so double-invocation (step retry, failure handler + manual
+// cancel racing) can never double-restock.
+export async function releaseOrderReservations({
+  orderId,
+  reason,
+  actorEmail,
+}: {
+  orderId: string;
+  reason: string;
+  actorEmail: string;
+}): Promise<{ released: Array<{ variantId: string; sku: string; quantity: number; stockAfter: number }> }> {
+  if (!isStoreDatabaseEnabled()) return { released: [] };
+  await ensureStoreReady();
+  const client = await getPool().connect();
+  const released: Array<{ variantId: string; sku: string; quantity: number; stockAfter: number }> = [];
+  try {
+    await client.query('begin');
+    const rows = await client.query(
+      `select order_id, variant_id, quantity, sku, name, size, color
+       from order_reservations
+       where order_id = $1 and released_at is null
+       for update`,
+      [orderId],
+    );
+
+    const batchId = `rel_${orderId}`;
+    for (const row of rows.rows) {
+      const variantId = String(row.variant_id);
+      const quantity = Number(row.quantity);
+
+      const locked = await client.query(
+        `select stock from product_variants where id = $1 for update`,
+        [variantId],
+      );
+      // Variant may have been deleted (catalog change) since the order.
+      // Still mark the reservation released so we never retry forever.
+      const currentStock = locked.rows[0] ? Number(locked.rows[0].stock) : null;
+      let stockAfter = currentStock ?? 0;
+      if (currentStock !== null) {
+        const updated = await client.query(
+          `update product_variants set stock = stock + $1, updated_at = now() where id = $2 returning stock`,
+          [quantity, variantId],
+        );
+        stockAfter = Number(updated.rows[0]?.stock ?? currentStock + quantity);
+        await client.query(
+          `insert into inventory_adjustments (
+             batch_id, actor_email, source, reason, mode, product_id, product_name,
+             sku, variant_id, size, color, previous_stock, quantity_change, new_stock, note
+           )
+           values ($1, $2, $3, $4, 'order_release', '', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [batchId, actorEmail, 'order-release', reason, String(row.name), String(row.sku),
+            variantId, String(row.size ?? ''), String(row.color ?? ''), currentStock, quantity, stockAfter, orderId],
+        );
+      }
+
+      await client.query(
+        `update order_reservations set released_at = now(), release_reason = $1
+         where order_id = $2 and variant_id = $3`,
+        [reason, orderId, variantId],
+      );
+      released.push({ variantId, sku: String(row.sku), quantity, stockAfter });
+    }
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+  return { released };
 }
 
 export async function recordPendingOrder({
@@ -1049,22 +1210,66 @@ export async function updateOrderStatus({
   status: OrderStatus;
   tracking?: string;
   notes?: string;
-}): Promise<void> {
+}): Promise<{ previousStatus: OrderStatus }> {
   if (!isOrderStatus(status)) {
     throw new Error(`Invalid order status: ${String(status)}`);
   }
   requireStoreDatabase();
   await ensureStoreReady();
+  const client = await getPool().connect();
+  try {
+    await client.query('begin');
+    const current = await client.query(
+      `select status from orders where order_id = $1 for update`,
+      [orderId],
+    );
+    if (current.rows.length === 0) throw new Error(`Order not found: ${orderId}`);
+    const previousStatus = normalizeOrderStatus(current.rows[0].status);
+    if (!canTransitionOrderStatus(previousStatus, status)) {
+      throw new Error(
+        `Invalid status transition for ${orderId}: ${previousStatus} → ${status}`,
+      );
+    }
+    await client.query(
+      `update orders
+       set status = $1,
+           tracking = coalesce($2, tracking),
+           notes = coalesce($3, notes),
+           updated_at = now()
+       where order_id = $4`,
+      [status, tracking ?? null, notes ?? null, orderId],
+    );
+    await client.query('commit');
+    return { previousStatus };
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// The payment reference lives on the order row as the Stripe session id;
+// cancellation resolves it to a PaymentIntent at refund time.
+export async function fetchOrderPaymentRef(
+  orderId: string,
+): Promise<{ stripeSessionId: string | null; status: OrderStatus; email: string; totalCents: number; currency: string } | null> {
+  if (!isStoreDatabaseEnabled()) return null;
+  await ensureStoreReady();
   const res = await getPool().query(
-    `update orders
-     set status = $1,
-         tracking = coalesce($2, tracking),
-         notes = coalesce($3, notes),
-         updated_at = now()
-     where order_id = $4`,
-    [status, tracking ?? null, notes ?? null, orderId],
+    `select stripe_session_id, status, customer_email, total_cents, currency
+     from orders where order_id = $1 limit 1`,
+    [orderId],
   );
-  if (res.rowCount === 0) throw new Error(`Order not found: ${orderId}`);
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    stripeSessionId: row.stripe_session_id ? String(row.stripe_session_id) : null,
+    status: normalizeOrderStatus(row.status),
+    email: String(row.customer_email ?? ''),
+    totalCents: Number(row.total_cents ?? 0),
+    currency: String(row.currency ?? 'USD'),
+  };
 }
 
 export async function fetchPublicOrders(limit = 50): Promise<
@@ -1599,9 +1804,17 @@ export async function listInventoryImportRuns(): Promise<InventoryImportRun[]> {
 export async function resetStoreInventoryFromCatalog({
   actorEmail,
   source = 'notion-swag-inventory',
+  overwriteStock = false,
+  deleteUnknownProducts = false,
 }: {
   actorEmail: string;
   source?: string;
+  // Replace live stock counts with the catalog seed numbers. Off by default:
+  // the live counts are the operational truth, the seed is a dev fixture.
+  overwriteStock?: boolean;
+  // Delete products that aren't in the static catalog. Off by default: those
+  // are exactly the admin/sheet-imported products an operator added on purpose.
+  deleteUnknownProducts?: boolean;
 }): Promise<{
   importRunId: number;
   products: number;
@@ -1617,17 +1830,19 @@ export async function resetStoreInventoryFromCatalog({
 
   try {
     for (const product of PRODUCTS) {
-      await upsertProduct(product, { preserveVariantStock: false });
+      await upsertProduct(product, { preserveVariantStock: !overwriteStock });
     }
 
-    await getPool().query(
-      'delete from product_variants where not (id = any($1::text[]))',
-      [variantIds],
-    );
-    await getPool().query(
-      'delete from products where not (id = any($1::text[]))',
-      [productIds],
-    );
+    if (deleteUnknownProducts) {
+      await getPool().query(
+        'delete from product_variants where not (id = any($1::text[]))',
+        [variantIds],
+      );
+      await getPool().query(
+        'delete from products where not (id = any($1::text[]))',
+        [productIds],
+      );
+    }
 
     const summary = {
       products: productIds.length,
@@ -1947,7 +2162,7 @@ function stringOrUndefined(value: unknown): string | undefined {
 }
 
 function normalizeOrderStatus(value: unknown): OrderStatus {
-  return value === 'fulfilled' || value === 'shipped' ? value : 'pending';
+  return isOrderStatus(value) ? value : 'pending';
 }
 
 function rowToAdminDiscountCode(row: Record<string, unknown>): AdminDiscountCode {

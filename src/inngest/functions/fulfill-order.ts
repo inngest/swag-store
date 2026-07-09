@@ -11,6 +11,7 @@ import {
   isStoreDatabaseEnabled,
   recordDiscountRedemption,
   recordPendingOrder,
+  releaseOrderReservations,
   reserveInventory,
   updateOrderStatus,
 } from '@/lib/store-db';
@@ -95,7 +96,7 @@ export const fulfillOrder = inngest.createFunction(
         })
         .join(', ');
 
-      const needsAttentionNote = `NEEDS ATTENTION: fulfillment failed after retries — ${failureReason}. Inventory NOT reserved; review before shipping.`;
+      const needsAttentionNote = `NEEDS ATTENTION: fulfillment failed after retries — ${failureReason}. Any reserved inventory has been auto-restocked; re-reserve before shipping.`;
 
       // If an order row already exists, another consumer (or a later step of
       // this run) recorded it successfully. Overwriting it would erase good
@@ -152,6 +153,31 @@ export const fulfillOrder = inngest.createFunction(
           stripeSessionId: data.stripeSessionId,
         });
       });
+
+      // Compensate the reserve-inventory step: whatever this order decremented
+      // goes back into stock. No-ops when nothing was reserved (the reservation
+      // ledger is written in the same transaction as the decrement) and on
+      // repeat invocations (released rows are skipped).
+      const restock = await step.run('release-inventory', async () => {
+        return releaseOrderReservations({
+          orderId,
+          reason: `Fulfillment failed: ${failureReason}`,
+          actorEmail: 'system:fulfill-order-failure',
+        });
+      });
+
+      if (restock.released.length > 0) {
+        await step.sendEvent('inventory-changed-after-release', {
+          id: `inventory-changed-release-${orderId}`,
+          name: 'store/inventory.changed',
+          data: {
+            appOrigin: APP_ORIGIN,
+            source: 'order-failure-release',
+            reason: 'Inventory restocked after failed fulfillment',
+            orderId,
+          },
+        });
+      }
 
       const refund = await step.run('refund-payment', async () => {
         if (!stripePaymentIntentId) {

@@ -14,7 +14,7 @@ export const orderChannel = channel({
     },
     status: {
       schema: z.object({
-        status: z.enum(['pending', 'fulfilled', 'shipped']),
+        status: z.enum(['pending', 'fulfilled', 'shipped', 'cancelled']),
         tracking: z.string().optional(),
         ts: z.number(),
       }),

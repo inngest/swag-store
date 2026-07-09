@@ -103,6 +103,69 @@ export async function sendOrderConfirmationEmail(
   return { sent: true, id: body?.id ?? null };
 }
 
+export type OrderShippedEmailInput = {
+  to: string;
+  orderId: string;
+  tracking: string;
+  appUrl: string;
+};
+
+export async function sendOrderShippedEmail(
+  input: OrderShippedEmailInput,
+): Promise<OrderConfirmationEmailResult> {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.ORDER_EMAIL_FROM;
+  if (!apiKey || !from) {
+    const missing = [!apiKey && 'RESEND_API_KEY', !from && 'ORDER_EMAIL_FROM']
+      .filter(Boolean)
+      .join(' + ');
+    return { sent: false, skipped: `${missing} not configured` };
+  }
+
+  const orderUrl = `${input.appUrl.replace(/\/$/, '')}/orders/${encodeURIComponent(input.orderId)}`;
+  const trackingBlock = input.tracking
+    ? `<p style="margin: 0 0 16px;">Tracking number: <strong>${escapeHtml(input.tracking)}</strong></p>`
+    : '';
+
+  const html = `<!doctype html>
+<html>
+  <body style="margin: 0; padding: 32px 16px; background: #fafafa; color: #111;">
+    <div style="max-width: 520px; margin: 0 auto; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 14px; line-height: 1.6;">
+      <p style="text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; color: #666;">Inngest Swag</p>
+      <h1 style="font-size: 18px; font-weight: 600; margin: 8px 0 24px;">Your order shipped.</h1>
+      <p style="margin: 0 0 16px;">Order <strong>${escapeHtml(input.orderId)}</strong> is on its way.</p>
+      ${trackingBlock}
+      <p style="margin: 24px 0 0;">
+        <a href="${orderUrl}" style="color: #111;">Order status →</a>
+      </p>
+    </div>
+  </body>
+</html>`;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: input.to,
+      subject: `Shipped — ${input.orderId}`,
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    // Same rule as the confirmation email: Resend error bodies can echo the
+    // recipient address, which must stay out of logs and step output.
+    throw new Error(`Resend responded ${res.status}`);
+  }
+
+  const body = (await res.json().catch(() => null)) as { id?: string } | null;
+  return { sent: true, id: body?.id ?? null };
+}
+
 function formatAmount(cents: number, currency: string): string {
   const amount = (Math.max(0, cents) / 100).toFixed(2);
   return currency.toLowerCase() === 'usd' ? `$${amount}` : `${amount} ${currency.toUpperCase()}`;

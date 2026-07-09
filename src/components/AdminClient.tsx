@@ -33,7 +33,17 @@ import type {
   OrderStatus,
 } from '@/lib/store-db';
 
-type Tab = 'inventory' | 'products' | 'pending' | 'fulfilled' | 'shipped' | 'discounts' | 'api' | 'imports';
+type Tab = 'inventory' | 'products' | 'pending' | 'fulfilled' | 'shipped' | 'cancelled' | 'discounts' | 'api' | 'imports';
+
+// Mirrors ORDER_STATUS_TRANSITIONS in store-db (which can't be imported into
+// a client component). Cancelling restocks the reserved units and refunds the
+// Stripe payment; shipped and cancelled are terminal.
+const STATUS_OPTIONS: Record<OrderStatus, readonly OrderStatus[]> = {
+  pending: ['pending', 'fulfilled', 'cancelled'],
+  fulfilled: ['fulfilled', 'shipped', 'cancelled'],
+  shipped: ['shipped'],
+  cancelled: ['cancelled'],
+};
 
 type ImportMessage = {
   importRunId?: number;
@@ -146,6 +156,7 @@ export function AdminClient({
   const pendingOrders = orders.filter((order) => order.status === 'pending');
   const fulfilledOrders = orders.filter((order) => order.status === 'fulfilled');
   const shippedOrders = orders.filter((order) => order.status === 'shipped');
+  const cancelledOrders = orders.filter((order) => order.status === 'cancelled');
   const lowStock = inventory.filter((row) => row.stock <= 5).length;
   const activeDiscounts = discounts.filter((discount) => discount.active).length;
   const activeApiTokens = apiTokens.filter((token) => token.active).length;
@@ -230,6 +241,7 @@ export function AdminClient({
             ['pending', 'Pending'],
             ['fulfilled', 'Fulfilled'],
             ['shipped', 'Shipped'],
+            ['cancelled', 'Cancelled'],
             ['discounts', 'Discounts'],
             ['api', 'API Tokens'],
             ['imports', 'Imports'],
@@ -296,6 +308,7 @@ export function AdminClient({
       {tab === 'pending' && <OrderTable orders={pendingOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
       {tab === 'fulfilled' && <OrderTable orders={fulfilledOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
       {tab === 'shipped' && <OrderTable orders={shippedOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
+      {tab === 'cancelled' && <OrderTable orders={cancelledOrders} canMutate={isDatabaseBacked} onStatusChange={saveOrderStatus} />}
       {tab === 'discounts' && (
         <DiscountTable
           rows={discounts}
@@ -831,9 +844,11 @@ function OrderRow({
         )}
       </div>
       <select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus)} disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)}>
-        <option value="pending">pending</option>
-        <option value="fulfilled">fulfilled</option>
-        <option value="shipped">shipped</option>
+        {(STATUS_OPTIONS[order.status] ?? ['pending', 'fulfilled', 'shipped', 'cancelled']).map((option) => (
+          <option key={option} value={option}>
+            {option === 'cancelled' ? 'cancelled (restock + refund)' : option}
+          </option>
+        ))}
       </select>
       <input value={tracking} onChange={(event) => setTracking(event.target.value)} placeholder="Tracking" disabled={fieldsDisabled} style={fieldStyle(fieldsDisabled)} />
       <div style={{ display: 'grid', gap: 6 }}>

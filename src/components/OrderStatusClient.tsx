@@ -49,7 +49,7 @@ type StepMessage = {
 };
 
 type StatusMessage = {
-  status: 'pending' | 'fulfilled' | 'shipped';
+  status: 'pending' | 'fulfilled' | 'shipped' | 'cancelled';
   tracking?: string;
   ts: number;
 };
@@ -228,20 +228,26 @@ export function OrderStatusClient({
   // Current fulfillment state: live realtime update wins, then the recorded order.
   const orderStatus = liveStatus?.status ?? hydrated?.status ?? '';
   const trackingNumber = (liveStatus?.tracking ?? hydrated?.tracking ?? '').trim();
-  const statusLabel = !allDone
-    ? 'IN PROGRESS · LIVE'
-    : orderStatus === 'shipped'
-      ? 'ORDER SHIPPED'
-      : orderStatus === 'fulfilled'
-        ? 'ORDER FULFILLED'
-        : 'ORDER RECEIVED';
-  const headline = !allDone
-    ? 'Shipping…'
-    : orderStatus === 'shipped'
-      ? 'Shipped.'
-      : orderStatus === 'fulfilled'
-        ? 'Fulfilled.'
-        : 'Received.';
+  const statusLabel =
+    orderStatus === 'cancelled'
+      ? 'ORDER CANCELLED'
+      : !allDone
+        ? 'IN PROGRESS · LIVE'
+        : orderStatus === 'shipped'
+          ? 'ORDER SHIPPED'
+          : orderStatus === 'fulfilled'
+            ? 'ORDER FULFILLED'
+            : 'ORDER RECEIVED';
+  const headline =
+    orderStatus === 'cancelled'
+      ? 'Cancelled.'
+      : !allDone
+        ? 'Shipping…'
+        : orderStatus === 'shipped'
+          ? 'Shipped.'
+          : orderStatus === 'fulfilled'
+            ? 'Fulfilled.'
+            : 'Received.';
 
   const paymentOutput = stepOutputs[0] as { amount?: number; currency?: string } | undefined;
   const inventoryOutput = stepOutputs[1] as

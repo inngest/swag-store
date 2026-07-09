@@ -20,14 +20,17 @@ For the person running the store day to day (Riley). No code knowledge required 
 
 ## 2. When an order comes in (the core loop)
 
-Every order lives in exactly one of three states: **pending → fulfilled → shipped**.
+Every order lives in exactly one of four states: **pending → fulfilled → shipped**, plus **cancelled**.
 
 1. **It arrives.** Customer checks out → the `fulfill-order` workflow captures payment, reserves inventory, records the order as **pending**. It appears in `/admin` (live tracker + Pending queue). You don't have to do anything for this part.
 2. **Pack it.** When you've physically packed the order, open `/admin`, find it in **Pending**, mark it **Fulfilled**.
 3. **Ship it.** When it's handed to the carrier, mark it **Shipped** and paste the **tracking number**. The customer's order page shows status + tracking.
 4. Use the **notes** field for anything future-you needs ("waiting on XL restock", "customer asked to combine orders").
+5. **Cancelling:** set status to **cancelled** (available on pending and fulfilled orders, not shipped ones). This automatically puts the reserved units back into stock AND refunds the Stripe payment — you don't touch inventory or the Stripe dashboard. A shipped order that comes back is a return: handle the refund in Stripe manually and receive the stock via the receive-shipment flow.
 
-Never skip states, and never edit order rows in the database directly.
+Never skip states, and never edit order rows in the database directly. Backward moves (shipped → pending etc.) are now rejected by the system.
+
+**Emails the customer gets:** order confirmation on checkout, and a shipped notice with the tracking number when you mark an order shipped (both require the Resend env vars to be set — until then neither sends).
 
 ## 3. Coupons (comp codes for meetups, etc.)
 
@@ -42,8 +45,9 @@ Never skip states, and never edit order rows in the database directly.
 - **Receiving a shipment:** `/admin` → Inventory → receive-shipment flow (+N per variant). This writes an audit record (who/when/before/after).
 - **Counting / correcting:** use the audit-count flow to set absolute numbers. Also audited.
 - **Low stock:** when a variant drops to the threshold (5), a Slack alert fires (`notify-low-inventory`).
-- **Full reset** (`POST /api/inventory/reset`) reseeds everything from the code-side catalog. This is a developer escape hatch, not an operator tool. Don't.
-- Orders reserve inventory automatically; you never decrement stock for an order by hand.
+- **Full reset** (`POST /api/inventory/reset`) reseeds product metadata from the code-side catalog. It now defaults to safe: live stock counts are preserved and admin-imported products are kept unless the caller explicitly passes `overwriteStock: true` / `deleteUnknownProducts: true`, and in production it refuses to run at all without `"confirm": "RESET-LIVE-STORE"` in the body. Still a developer tool, still don't.
+- Orders reserve inventory automatically; you never decrement stock for an order by hand. Sale reservations and their releases (failed orders, cancellations) now appear in the same audit trail as manual adjustments (`order_reservation` / `order_release` rows).
+- A failed or cancelled order puts its units back into stock automatically — no manual correction needed.
 
 ## 4b. Product images
 
@@ -72,7 +76,7 @@ The canonical path for adding products to the store:
 ## 6. Things to know / current limitations
 
 - **Stripe is in TEST mode in production** (DEV-400). Card checkouts don't move real money. Until that decision is made, treat the store as comp-code-driven. Test card for demos: `4242 4242 4242 4242`, any future expiry, any CVC.
-- A failed order workflow (e.g. two people race for the last unit) lands in Pending flagged **NEEDS ATTENTION** with the failure reason in notes, and the payment is auto-refunded (post DEV-388 fix). If you see one: check inventory for the item, contact the customer, and either re-place or confirm the refund.
+- A failed order workflow (e.g. two people race for the last unit) lands in Pending flagged **NEEDS ATTENTION** with the failure reason in notes, the payment is auto-refunded (post DEV-388 fix), and any reserved inventory is auto-restocked. If you see one: contact the customer and either re-place or confirm the refund, then cancel the parked order.
 - The orders Google Sheet is a legacy fallback; Postgres (via `/admin`) is the source of truth.
 
 ## 7. When something looks broken

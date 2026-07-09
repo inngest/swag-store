@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { PRODUCTS, PRODUCT_SIZE_ORDER, type Product, type ProductColor, type ProductSize } from './catalog';
+import {
+  PRODUCTS,
+  PRODUCT_SIZE_ORDER,
+  RETIRED_SEED_PRODUCT_IDS,
+  type Product,
+  type ProductColor,
+  type ProductSize,
+} from './catalog';
 import { CheckoutInputError } from './checkout-errors';
 import { getPool, hasDatabaseUrl } from './db';
 import type { OrderDetail, OrderRow } from './sheets';
@@ -198,6 +205,7 @@ function sizeOrderSql(column: string): string {
 }
 
 let readyPromise: Promise<void> | null = null;
+const staticProductOrder = new Map(PRODUCTS.map((product, index) => [product.id, index]));
 
 export function isStoreDatabaseEnabled(): boolean {
   return hasDatabaseUrl();
@@ -408,6 +416,13 @@ async function seedStaticCatalog(): Promise<void> {
   for (const product of PRODUCTS) {
     await upsertProduct(product, { preserveVariantStock: true });
   }
+
+  if (RETIRED_SEED_PRODUCT_IDS.length > 0) {
+    await getPool().query(
+      'delete from products where id = any($1::text[])',
+      [RETIRED_SEED_PRODUCT_IDS],
+    );
+  }
 }
 
 export async function listPublicProducts(): Promise<Product[]> {
@@ -436,7 +451,7 @@ export async function listPublicProducts(): Promise<Product[]> {
     variantsByProduct.set(productId, variants);
   }
 
-  return productsRes.rows.map((row) => ({
+  const products: Product[] = productsRes.rows.map((row): Product => ({
     id: String(row.id),
     slug: String(row.slug),
     name: String(row.name),
@@ -459,6 +474,8 @@ export async function listPublicProducts(): Promise<Product[]> {
     featured: Boolean(row.featured),
     tags: parseJsonArray<string>(row.tags) ?? [],
   }));
+
+  return products.sort(compareCatalogProducts);
 }
 
 export async function getPublicProduct(slug: string): Promise<Product | undefined> {
@@ -1906,6 +1923,12 @@ function compareInventoryRows(a: AdminInventoryRow, b: AdminInventoryRow): numbe
     a.color.localeCompare(b.color) ||
     a.variantId.localeCompare(b.variantId)
   );
+}
+
+function compareCatalogProducts(a: Product, b: Product): number {
+  const orderA = staticProductOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+  const orderB = staticProductOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+  return orderA - orderB || a.name.localeCompare(b.name) || a.sku.localeCompare(b.sku);
 }
 
 function sizeOrderRank(size: string | undefined): number {

@@ -157,7 +157,7 @@ export function normalizeProductInput(input: ProductUpsertInput): Product {
   if (!sku) throw new Error('Product SKU is required.');
 
   const slug = slugify(input.slug || name);
-  const id = slugify(input.id || `prod_${slug}`, '_');
+  const id = input.id ? slugifyId(input.id) : slugify(`prod_${slug}`, '_');
   const priceDollars = Number(input.priceDollars);
   if (!Number.isFinite(priceDollars) || priceDollars < 0) {
     throw new Error('Price must be a positive dollar amount.');
@@ -325,6 +325,15 @@ function slugify(value: string, separator = '-'): string {
     .replace(/[^a-z0-9]+/g, separator)
     .replace(new RegExp(`${escapeRegExp(separator)}+`, 'g'), separator)
     .replace(new RegExp(`^${escapeRegExp(separator)}|${escapeRegExp(separator)}$`, 'g'), '');
+}
+
+function slugifyId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
 }
 
 function escapeRegExp(value: string): string {

@@ -86,10 +86,12 @@ npx inngest-cli@latest dev
 
 | Product | Slug | Price | Sizes | Colors |
 |---------|------|-------|-------|--------|
-| Durably Yours T-shirt | `durably-yours-tee` | $35.00 | XS-XXL | Quantum Black, Citrine Cream |
-| Inngest Hoodie | `inngest-hoodie` | $65.00 | S-XXL | Quantum Black |
-| Step Function Sticker Pack | `step-function-sticker-pack` | $12.00 | — | — |
-| Inngest Enamel Pin | `enamel-pin` | $15.00 | — | — |
+| Anti Anti Infra Co. | `anti-anti-infra-tee` | $28.00 | S-XXXL | Heather Grey |
+| Anti Anti Infra Co. Hoodie | `anti-anti-infra-hoodie` | $64.00 | S-XXL | Black |
+| Black Step.run Socks | `black-step-run-socks` | $12.00 | — | Black Step.run |
+| Cream Step.run Socks | `cream-step-run-socks` | $12.00 | — | Cream Step.run |
+| Insulated Coffee Mug 12 oz | `insulated-coffee-mug-12oz` | $18.00 | — | Black |
+| Baseball Cap | `baseball-cap` | $24.00 | — | Black |
 
 **Source file:** `src/lib/catalog.ts` — edit this to add products during the livestream.
 

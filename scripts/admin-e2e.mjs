@@ -23,12 +23,13 @@ const apiTokenName = `E2E API ${runId}`;
 const importSource = `E2E Import ${runId}`;
 const hasSheetImportConfig = Boolean(process.env.INVENTORY_SHEET_ID || process.env.ORDERS_SHEET_ID);
 const inventoryImportCsv = [
-  'item,S,M,L,XL,XXL,XXXL',
-  'Anti Anti Infra Co.,20,24,21,23,11,7',
-  'Step.run Socks,58,,,,,',
-  'Durable Workflow Hoodie,8,14,16,11,5,',
-  'Moss Ops Cap,42,,,,,',
-  'Workflow Sticker Pack,120,,,,,',
+  'item,one,S,M,L,XL,XXL,XXXL',
+  'Anti Anti Infra Co.,,20,24,21,23,11,7',
+  'Anti Anti Infra Co. Hoodie,,8,14,16,11,5,',
+  'Black Step.run Socks,1,,,,,,',
+  'Cream Step.run Socks,1,,,,,,',
+  'Insulated Coffee Mug 12 oz,13,,,,,,',
+  'Baseball Cap,15,,,,,,',
 ].join('\n');
 const screenshots = [];
 const consoleErrors = [];
@@ -259,7 +260,7 @@ async function testProducts() {
   await page.getByPlaceholder('anti-anti-infra-tee').fill(productSlug);
   await page.getByPlaceholder('T-Shirt').fill('T-Shirt');
   await page.getByPlaceholder('28').fill('19.50');
-  await page.getByPlaceholder('/products/shirt-grey.png').fill('/products/e2e.png');
+  await page.getByPlaceholder('/products/anti-anti-infra-shirt.png').fill('/products/e2e.png');
   await page.getByPlaceholder('linear-gradient(...)').fill('linear-gradient(135deg, #f6f3ed, #ff7300)');
   await page.getByPlaceholder('Office stock for customers').fill('E2E tagline');
   await page.getByPlaceholder('Short product card copy').fill('E2E card blurb');
@@ -270,7 +271,7 @@ async function testProducts() {
   await page.locator('textarea').first().fill('E2E product description');
   await page.getByPlaceholder('grey,#B8B5AE,Heather Grey\ncitrus,#FF7300,Citrus Glow').fill('grey,#B8B5AE,Heather Grey');
   await page.getByPlaceholder('S, M, L, XL, XXL, XXXL').fill('XS, S, M, L, XL, XXL, XXXL');
-  await page.getByPlaceholder('var_aai-tee-grey-s,S,grey,20\nvar_aai-tee-grey-m,M,grey,24\nvar_step-socks-one,,citrus,58')
+  await page.getByPlaceholder('var_aai-tee-grey-s,S,grey,20\nvar_aai-tee-grey-m,M,grey,24\nvar_black-step-socks-one,,black,1')
     .fill(`${productId}-xs,XS,grey,1\n${productId}-s,S,grey,2\n${productId}-m,M,grey,3`);
   await clickButton('CREATE PRODUCT');
   await expectVisible(page.getByRole('link', { name: productName, exact: true }), 'created product listed');
@@ -281,7 +282,7 @@ async function testProducts() {
   await productRow.getByRole('button', { name: 'EDIT', exact: true }).click();
   note('product edit clicked');
   await page.getByPlaceholder('28').fill('21.25');
-  await page.getByPlaceholder('/products/shirt-grey.png').fill('/products/e2e-updated.png');
+  await page.getByPlaceholder('/products/anti-anti-infra-shirt.png').fill('/products/e2e-updated.png');
   await clickButton('SAVE PRODUCT');
   await expectVisible(page.getByText('$21.25', { exact: true }), 'product update saved');
   await clickButton('NEW');
@@ -352,7 +353,7 @@ async function testDocumentImport() {
   writeFileSync(filePath, `${inventoryImportCsv}\n`);
   await page.locator('input[type="file"]').setInputFiles(filePath);
   await page.getByPlaceholder('Swag inventory export').fill(importSource);
-  await page.getByPlaceholder('item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58')
+  await page.getByPlaceholder('item,one,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,,20,24,21,23,11,7\nAnti Anti Infra Co. Hoodie,,8,14,16,11,5,\nBlack Step.run Socks,1,,,,,,\nCream Step.run Socks,1,,,,,,\nInsulated Coffee Mug 12 oz,13,,,,,,\nBaseball Cap,15,,,,,,')
     .fill(inventoryImportCsv);
   await clickButton('IMPORT DOC');
   await expectVisible(page.getByText(/document import requested|uploading inventory document/i), 'document import requested');

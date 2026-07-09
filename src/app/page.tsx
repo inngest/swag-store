@@ -23,7 +23,7 @@ export default async function CatalogPage() {
 function Hero() {
   const trackerSteps = [
     { name: 'capture-payment', detail: 'stripe.payment_intent · usd 28.00', duration: '0.32s' },
-    { name: 'reserve-inventory', detail: 'sku INN-TEE-01 · qty 1', duration: '0.18s' },
+    { name: 'reserve-inventory', detail: 'sku INN-AAI-TEE · qty 1', duration: '0.18s' },
     { name: 'record-order', detail: 'status: pending · db: railway', duration: '0.41s' },
   ];
 

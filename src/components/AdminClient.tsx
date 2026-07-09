@@ -511,7 +511,7 @@ function ProductManager({
           </div>
 
           <div style={{ display: 'grid', gap: 10, paddingTop: 10 }}>
-            <LabeledInput label="IMAGE PATH / URL" value={draft.image ?? ''} onChange={(value) => update({ image: value })} disabled={fieldsDisabled} placeholder="/products/shirt-grey.png" />
+            <LabeledInput label="IMAGE PATH / URL" value={draft.image ?? ''} onChange={(value) => update({ image: value })} disabled={fieldsDisabled} placeholder="/products/anti-anti-infra-shirt.png" />
             <div>
               <div className="mono" style={labelStyle}>UPLOAD IMAGE (PNG / JPEG / WEBP, MAX 4MB)</div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -559,7 +559,7 @@ function ProductManager({
             onChange={(value) => update({ variantsText: value })}
             disabled={fieldsDisabled}
             rows={8}
-            placeholder={'var_aai-tee-grey-s,S,grey,20\nvar_aai-tee-grey-m,M,grey,24\nvar_step-socks-one,,citrus,58'}
+            placeholder={'var_aai-tee-grey-s,S,grey,20\nvar_aai-tee-grey-m,M,grey,24\nvar_black-step-socks-one,,black,1'}
           />
           <div style={{ display: 'flex', gap: 8, paddingTop: 12 }}>
             <button className="btn btn-citrus square" onClick={() => void submit()} disabled={!canMutate || isSaving || !draft.name.trim() || !draft.sku.trim()}>
@@ -1581,7 +1581,7 @@ function DocumentImportPanel({
           value={text}
           onChange={(event) => setText(event.target.value)}
           disabled={!canMutate || isUploading || isPending}
-          placeholder={'item,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,20,24,21,23,11,7\nStep.run Socks,58\nDurable Workflow Hoodie,8,14,16,11,5,\nMoss Ops Cap,42,,,,,\nWorkflow Sticker Pack,120,,,,,'}
+          placeholder={'item,one,S,M,L,XL,XXL,XXXL\nAnti Anti Infra Co.,,20,24,21,23,11,7\nAnti Anti Infra Co. Hoodie,,8,14,16,11,5,\nBlack Step.run Socks,1,,,,,,\nCream Step.run Socks,1,,,,,,\nInsulated Coffee Mug 12 oz,13,,,,,,\nBaseball Cap,15,,,,,,'}
           rows={4}
           style={{ ...fieldStyle(!canMutate || isUploading || isPending), resize: 'vertical', lineHeight: 1.5 }}
         />

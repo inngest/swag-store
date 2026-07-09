@@ -5,6 +5,7 @@ import type Stripe from 'stripe';
 import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { orderChannel } from '@/inngest/channels';
+import { isOrderEmailConfigured } from '@/lib/email';
 import { fetchOrder } from '@/lib/store-db';
 import { getStripe } from '@/lib/stripe';
 
@@ -45,7 +46,10 @@ export async function fetchOrderDetailAction(orderId: string) {
 export async function unlockOrderViewing(
   orderId: string,
   sessionId: string,
-): Promise<{ email: string | null; name: string | null } | { error: string }> {
+): Promise<
+  | { email: string | null; name: string | null; confirmationEmailSent: boolean }
+  | { error: string }
+> {
   if (!orderId || !sessionId) return { error: 'missing arguments' };
 
   let session: Stripe.Checkout.Session;
@@ -71,6 +75,9 @@ export async function unlockOrderViewing(
   return {
     email: session.customer_details?.email ?? session.customer_email ?? null,
     name: session.customer_details?.name ?? null,
+    // Lets the confirmation page tell the truth: only claim "we emailed you"
+    // when the workflow's send-confirmation step actually sends.
+    confirmationEmailSent: isOrderEmailConfigured(),
   };
 }
 

@@ -12,6 +12,7 @@ function ConfirmationContent() {
   const orderId = params.get('ord') ?? 'ord_demo01';
   const sessionId = params.get('session_id');
   const [email, setEmail] = React.useState<string | null>(null);
+  const [emailSent, setEmailSent] = React.useState(false);
   const { clearCart } = useCart();
 
   React.useEffect(() => {
@@ -32,6 +33,7 @@ function ConfirmationContent() {
         if (cancelled) return;
         if ('email' in result) {
           setEmail(result.email);
+          setEmailSent(result.confirmationEmailSent);
         } else {
           console.error('[confirmation-unlock] failed', result.error);
         }
@@ -68,7 +70,7 @@ function ConfirmationContent() {
           </div>
           {email && (
             <div className="mono" style={{ fontSize: 11, marginTop: 8, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              EMAILED A COPY · {email.toUpperCase()}
+              {emailSent ? `EMAILED A COPY · ${email.toUpperCase()}` : `ORDER FOR · ${email.toUpperCase()}`}
             </div>
           )}
         </div>

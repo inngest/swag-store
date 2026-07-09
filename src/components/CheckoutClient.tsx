@@ -18,7 +18,7 @@ type AppliedDiscount = {
   percentOff: number | null;
 };
 
-export function CheckoutClient({ products }: { products: Product[] }) {
+export function CheckoutClient({ products, stripeTestMode }: { products: Product[]; stripeTestMode: boolean }) {
   const { state } = useCart();
   const [stage, setStage] = useState<Stage>('review');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -246,7 +246,7 @@ export function CheckoutClient({ products }: { products: Product[] }) {
               </div>
             )}
             <div className="mono" style={{ fontSize: 10, textAlign: 'center', marginTop: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              POWERED BY STRIPE · TEST MODE
+              POWERED BY STRIPE{stripeTestMode ? ' · TEST MODE' : ''}
             </div>
           </div>
         </div>

@@ -475,10 +475,29 @@ async function createStripeCheckoutSession({
     ? await ensureStripeCouponForDiscount(appliedDiscount)
     : null;
 
+  // Live-mode commerce config, both env-gated so test/QA environments work
+  // without dashboard setup:
+  // - STRIPE_AUTOMATIC_TAX=1 once Stripe Tax is activated + nexus registered.
+  // - STRIPE_SHIPPING_RATE_IDS: comma-separated shr_... ids created in the
+  //   dashboard. Unset = free shipping (the pre-launch behavior).
+  const automaticTax = process.env.STRIPE_AUTOMATIC_TAX === '1';
+  const shippingRateIds = (process.env.STRIPE_SHIPPING_RATE_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
   const session = await getStripe().checkout.sessions.create({
     mode: 'payment',
+    // Pinned to card so a delayed-settlement method (ACH, BNPL) enabled in
+    // the dashboard can't complete a session before funds actually clear —
+    // the webhook only handles synchronous checkout.session.completed.
+    payment_method_types: ['card'],
     line_items: lineItems,
     ...(stripeCouponId ? { discounts: [{ coupon: stripeCouponId }] } : {}),
+    ...(automaticTax ? { automatic_tax: { enabled: true } } : {}),
+    ...(shippingRateIds.length > 0
+      ? { shipping_options: shippingRateIds.map((id) => ({ shipping_rate: id })) }
+      : {}),
     success_url: `${origin}/orders/confirmation?ord=${orderId}&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/checkout`,
     ...(customerEmail ? { customer_email: customerEmail } : {}),
